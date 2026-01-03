@@ -109,7 +109,14 @@ def run(
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+    from reachy_mini_conversation_app.config import config
+    if config.provider == "google":
+        logger.info("Using Gemini Realtime Handler")
+        from reachy_mini_conversation_app.gemini_realtime import GeminiRealtimeHandler
+        handler = GeminiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+    else:
+        logger.info("Using OpenAI Realtime Handler")
+        handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
 
     stream_manager: gr.Blocks | LocalStream | None = None
 

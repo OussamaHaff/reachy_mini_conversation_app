@@ -16,19 +16,17 @@ dependencies = [
     "gradio==5.50.1.dev1",
     "huggingface_hub>=0.34.4",
     "opencv-python>=4.12.0.88",
-
     #Environment variables
     "python-dotenv",
-
     #OpenAI
     "openai>=2.1",
-
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
-    "reachy_mini>=1.2.3rc1",
+    "reachy_mini==1.2.5",
     "eclipse-zenoh~=1.7.0",
     "gradio_client>=1.13.3",
+    "google-genai>=1.56.0",
 ]
 
 [project.optional-dependencies]

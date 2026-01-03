@@ -22,6 +22,7 @@ class Config:
 
     # Required
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # The key is downloaded in console.py if needed
+    GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
     # Optional
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")
@@ -33,6 +34,13 @@ class Config:
 
     REACHY_MINI_CUSTOM_PROFILE = os.getenv("REACHY_MINI_CUSTOM_PROFILE")
     logger.debug(f"Custom Profile: {REACHY_MINI_CUSTOM_PROFILE}")
+
+    @property
+    def provider(self) -> str:
+        """Determine the AI provider based on the model name."""
+        if "gemini" in self.MODEL_NAME.lower():
+            return "google"
+        return "openai"
 
 
 config = Config()
