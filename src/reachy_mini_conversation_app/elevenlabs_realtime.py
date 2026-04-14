@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 ELEVENLABS_SAMPLE_RATE: Final[int] = 16000
 
 # Best ElevenLabs voice model for low-latency conversational AI (Flash v2.5)
-ELEVENLABS_TTS_MODEL: Final[str] = "eleven_flash_v2_5"
+ELEVENLABS_TTS_MODEL: Final[str] = "eleven_flash_v2"
 
 # Default LLM for the agent (good tool-calling support, cost-effective)
 ELEVENLABS_LLM_MODEL: Final[str] = "gpt-4o-mini"
