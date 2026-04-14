@@ -444,18 +444,11 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
         # __init__ typically wraps a sync client to build the signed URL.
         sync_client = ElevenLabs(**_client_kwargs(api_key))
 
-        # Wrap callbacks so they create asyncio tasks (ElevenLabs may call them synchronously)
-        loop = asyncio.get_event_loop()
+        async def _agent_cb(text: str) -> None:
+            await self._on_agent_response(text)
 
-        def _agent_cb(text: str) -> None:
-            loop.call_soon_threadsafe(
-                lambda: asyncio.ensure_future(self._on_agent_response(text))
-            )
-
-        def _user_cb(transcript: str) -> None:
-            loop.call_soon_threadsafe(
-                lambda: asyncio.ensure_future(self._on_user_transcript(transcript))
-            )
+        async def _user_cb(transcript: str) -> None:
+            await self._on_user_transcript(transcript)
 
         self.conversation = AsyncConversation(
             client=sync_client,
