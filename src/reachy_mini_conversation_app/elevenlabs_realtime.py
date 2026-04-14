@@ -551,7 +551,7 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
 
                 return json.dumps(result)
 
-            client_tools.register(name=tool_name, fn=_handler, is_async=True)
+            client_tools.register(tool_name, _handler, is_async=True)
 
         return client_tools
 
