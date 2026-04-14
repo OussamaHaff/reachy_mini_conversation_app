@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, Final, Literal, Optional, Tuple
 import cv2
 import numpy as np
 import gradio as gr
-from elevenlabs import ElevenLabs
+from elevenlabs import ElevenLabs, AsyncElevenLabs
 from elevenlabs.conversational_ai.conversation import (
     AsyncConversation,
     AsyncAudioInterface,
@@ -77,6 +77,20 @@ def _resolve_voice_id(voice_name: str | None) -> str:
     if len(voice_name) >= 20 and voice_name.replace("_", "").isalnum():
         return voice_name
     return _OPENAI_TO_ELEVENLABS_VOICE.get(voice_name, _DEFAULT_VOICE_ID)
+
+
+def _client_kwargs(api_key: str) -> Dict[str, Any]:
+    """Return keyword arguments for ``ElevenLabs`` / ``AsyncElevenLabs`` construction.
+
+    Injects ``base_url`` when ``ELEVENLABS_API_BASE_URL`` is set (e.g. for EU residency:
+    ``https://api.eu.residency.elevenlabs.io``).
+    """
+    kwargs: Dict[str, Any] = {"api_key": api_key}
+    base_url = (config.ELEVENLABS_API_BASE_URL or "").strip()
+    if base_url:
+        kwargs["base_url"] = base_url
+        logger.debug("ElevenLabs client using custom base_url: %s", base_url)
+    return kwargs
 
 
 def _build_elevenlabs_tool(spec: Dict[str, Any]) -> Dict[str, Any]:
@@ -427,7 +441,7 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
 
         # Use a synchronous ElevenLabs client here because AsyncConversation's
         # __init__ typically wraps a sync client to build the signed URL.
-        sync_client = ElevenLabs(api_key=api_key)
+        sync_client = ElevenLabs(**_client_kwargs(api_key))
 
         # Wrap callbacks so they create asyncio tasks (ElevenLabs may call them synchronously)
         loop = asyncio.get_event_loop()
@@ -550,7 +564,7 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
 
         Returns the agent_id to use for the conversation.
         """
-        client = ElevenLabs(api_key=api_key)
+        client = ElevenLabs(**_client_kwargs(api_key))
 
         el_tools = [_build_elevenlabs_tool(spec) for spec in get_tool_specs()]
         instructions = get_session_instructions()

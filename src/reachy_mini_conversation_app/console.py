@@ -288,10 +288,11 @@ class LocalStream:
             try:
                 import httpx
 
+                base_url = (config.ELEVENLABS_API_BASE_URL or "https://api.elevenlabs.io").rstrip("/")
                 headers = {"xi-api-key": key, "Content-Type": "application/json"}
                 async with httpx.AsyncClient(timeout=10.0) as http_client:
                     response = await http_client.get(
-                        "https://api.elevenlabs.io/v1/user", headers=headers
+                        f"{base_url}/v1/user", headers=headers
                     )
                     if response.status_code == 200:
                         return JSONResponse({"valid": True})
