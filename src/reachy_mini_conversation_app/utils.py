@@ -31,6 +31,12 @@ def parse_args() -> Tuple[argparse.Namespace, list]:  # type: ignore
         default=None,
         help="[Optional] Robot name/prefix for Zenoh topics (must match daemon's --robot-name). Only needed for development with multiple robots.",
     )
+    parser.add_argument(
+        "--host",
+        type=str,
+        default=None,
+        help="[Optional] Robot hostname or IP address for wireless connection (e.g. reachy-mini.local or 192.168.1.42). When provided, forces network connection mode.",
+    )
     return parser.parse_known_args()
 
 
@@ -103,21 +109,28 @@ def setup_logger(debug: bool) -> logging.Logger:
         logging.getLogger("aioice").setLevel(logging.WARNING)
     return logger
 
-def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[str]) -> None:
+def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[str], host: Optional[str] = None) -> None:
     """Log troubleshooting steps for connection issues."""
     logger.error("Troubleshooting steps:")
-    logger.error("  1. Verify reachy-mini-daemon is running")
+    logger.error("  1. Verify reachy-mini-daemon is running on the robot")
+
+    if host is not None:
+        logger.error(f"  2. Verify the robot is reachable: ping {host}")
+    else:
+        logger.error(
+            "  2. For wireless connection, provide the robot's hostname or IP: "
+            "--host reachy-mini.local  (or --host <ip-address>)"
+        )
 
     if robot_name is not None:
         logger.error(
-            f"  2. Daemon must be started with: --robot-name '{robot_name}'"
+            f"  3. Daemon must be started with: --robot-name '{robot_name}'"
         )
     else:
         logger.error(
-            "  2. If daemon uses --robot-name, add the same flag here: "
+            "  3. If daemon uses --robot-name, add the same flag here: "
             "--robot-name <name>"
         )
 
-    logger.error("  3. For wireless: check network connectivity")
     logger.error("  4. Review daemon logs")
     logger.error("  5. Restart the daemon")

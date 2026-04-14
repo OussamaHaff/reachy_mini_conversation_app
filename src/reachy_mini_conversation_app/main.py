@@ -63,8 +63,12 @@ def run(
             robot_kwargs = {}
             if args.robot_name is not None:
                 robot_kwargs["robot_name"] = args.robot_name
-
-            logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
+            if args.host is not None:
+                robot_kwargs["host"] = args.host
+                robot_kwargs["connection_mode"] = "network"
+                logger.info(f"Initializing ReachyMini (network mode, host={args.host})")
+            else:
+                logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
             robot = ReachyMini(**robot_kwargs)
 
         except TimeoutError as e:
@@ -72,7 +76,7 @@ def run(
                 "Connection timeout: Failed to connect to Reachy Mini daemon. "
                 f"Details: {e}"
             )
-            log_connection_troubleshooting(logger, args.robot_name)
+            log_connection_troubleshooting(logger, args.robot_name, getattr(args, "host", None))
             sys.exit(1)
 
         except ConnectionError as e:
@@ -80,7 +84,7 @@ def run(
                 "Connection failed: Unable to establish connection to Reachy Mini. "
                 f"Details: {e}"
             )
-            log_connection_troubleshooting(logger, args.robot_name)
+            log_connection_troubleshooting(logger, args.robot_name, getattr(args, "host", None))
             sys.exit(1)
 
         except Exception as e:

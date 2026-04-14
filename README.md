@@ -141,7 +141,7 @@ uv sync --extra all_vision           # All vision features
 
 Combine extras or include dev dependencies:
 ```bash
-uv sync --extra all_vision --group dev
+uv sync --extra all_vision --extra reachy_mini_wireless --group dev
 ```
 
 </details>
