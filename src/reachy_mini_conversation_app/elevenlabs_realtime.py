@@ -12,7 +12,7 @@ import base64
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Callable, Dict, Final, Literal, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, Final, Literal, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -122,15 +122,17 @@ class FastRTCAudioInterface(AsyncAudioInterface):
         output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]",
         head_wobbler: Any | None = None,
     ) -> None:
-        self._input_callback: Callable[[bytes], None] | None = None
+        self._input_callback: Callable[[bytes], Awaitable[None]] | None = None
         self._output_queue = output_queue
         self._head_wobbler = head_wobbler
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     # --- AsyncAudioInterface contract ---
 
-    async def start(self, input_callback: Callable[[bytes], None]) -> None:
+    async def start(self, input_callback: Callable[[bytes], Awaitable[None]]) -> None:
         """Store the ElevenLabs input callback; called before the session starts."""
         self._input_callback = input_callback
+        self._loop = asyncio.get_event_loop()
 
     async def stop(self) -> None:
         """Release the callback; called after the session ends."""
@@ -166,8 +168,8 @@ class FastRTCAudioInterface(AsyncAudioInterface):
 
     def feed_audio(self, pcm_bytes: bytes) -> None:
         """Push raw 16-bit PCM bytes into ElevenLabs (called from ``receive``)."""
-        if self._input_callback is not None:
-            self._input_callback(pcm_bytes)
+        if self._input_callback is not None and self._loop is not None:
+            asyncio.run_coroutine_threadsafe(self._input_callback(pcm_bytes), self._loop)
 
 
 # ---------------------------------------------------------------------------
