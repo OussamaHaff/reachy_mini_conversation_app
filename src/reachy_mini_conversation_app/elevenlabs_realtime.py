@@ -564,7 +564,7 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
                         "prompt": instructions,
                         "llm": ELEVENLABS_LLM_MODEL,
                     },
-                    "first_message": "Hello! I'm Reachy Mini. How can I help you?",
+                    "first_message": "Hello! I'm Reachy Loco. How can I help you?",
                     "language": "en",
                     "tools": el_tools,
                 },
