@@ -435,7 +435,6 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
         conversation_config_override: Dict[str, Any] = {
             "agent": {
                 "prompt": {"prompt": get_session_instructions()},
-                "first_message": "Hello! I'm Reachy Mini. How can I help you?",
             },
         }
 
