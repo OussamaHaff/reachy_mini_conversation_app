@@ -571,10 +571,10 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
                     "prompt": {
                         "prompt": instructions,
                         "llm": ELEVENLABS_LLM_MODEL,
+                        "tools": el_tools,
                     },
                     "first_message": "Hello! I'm Reachy Loco. How can I help you?",
                     "language": "en",
-                    "tools": el_tools,
                 },
                 "tts": {
                     "model_id": ELEVENLABS_TTS_MODEL,

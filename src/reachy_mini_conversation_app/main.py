@@ -69,6 +69,8 @@ def run(
                 logger.info(f"Initializing ReachyMini (network mode, host={args.host})")
             else:
                 logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
+            if args.no_camera:
+                robot_kwargs["media_backend"] = "no_media"
             robot = ReachyMini(**robot_kwargs)
 
         except TimeoutError as e:
