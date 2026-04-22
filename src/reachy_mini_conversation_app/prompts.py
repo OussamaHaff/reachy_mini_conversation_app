@@ -91,7 +91,7 @@ def get_session_instructions() -> str:
         sys.exit(1)
 
 
-def get_session_voice(default: str = "cedar") -> str:
+def get_session_voice(default: str = "verse") -> str:
     """Resolve the voice to use for the session.
 
     Checks the active profile's voice.txt first (custom or default),

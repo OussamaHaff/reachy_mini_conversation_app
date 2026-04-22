@@ -91,6 +91,7 @@ flowchart TD
 ```
 
 **Data flows:**
+
 | Path | Format | Notes |
 |------|--------|-------|
 | Mic → ElevenLabs | 16 kHz int16 PCM bytes | Resampled from fastrtc input rate if needed |
