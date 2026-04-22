@@ -16,22 +16,19 @@ dependencies = [
     "gradio==5.50.1.dev1",
     "huggingface-hub==1.3.0",
     "opencv-python>=4.12.0.88",
-
     #Environment variables
     "python-dotenv",
-
     #ElevenLabs (conversational AI)
     "elevenlabs==2.44.0",
-
     #OpenAI (kept for local vision / camera tool compatibility)
     "openai==2.32.0",
-
     #Reachy mini
     "reachy_mini_dances_library",
     "reachy_mini_toolbox",
     "reachy-mini==1.6.4",
     "eclipse-zenoh==1.9.0",
     "gradio_client>=1.13.3",
+    "firecrawl-py>=4.22.3",
 ]
 
 [project.optional-dependencies]

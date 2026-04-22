@@ -1121,6 +1121,24 @@ wheels = [
 ]
 
 [[package]]
+name = "firecrawl-py"
+version = "4.22.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "httpx" },
+    { name = "nest-asyncio" },
+    { name = "pydantic" },
+    { name = "python-dotenv" },
+    { name = "requests" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f1/3c/2d4e70d227adf89a868a0c5b689be753c5d7c07dbbd8823674548c215599/firecrawl_py-4.22.3.tar.gz", hash = "sha256:977b0dbe12f5e30a28033d2edb8b1a85f159217a608379ba91493fba71554604", size = 179145, upload-time = "2026-04-21T18:28:09.799Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/59/61/5a8129b88605de56884067b0e401da469ed13b36f0602526eb9888f9dff5/firecrawl_py-4.22.3-py3-none-any.whl", hash = "sha256:0ee0b85d29bcc681e502ea37d2c0e4d88abb607de5aa69ec51f9b3da64068637", size = 224752, upload-time = "2026-04-21T18:28:08.391Z" },
+]
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 source = { registry = "https://pypi.org/simple" }
@@ -2808,6 +2826,15 @@ wheels = [
 ]
 
 [[package]]
+name = "nest-asyncio"
+version = "1.6.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/83/f8/51569ac65d696c8ecbee95938f89d4abf00f47d58d48f6fbabfe8f0baefe/nest_asyncio-1.6.0.tar.gz", hash = "sha256:6f172d5449aca15afd6c646851f4e31e02c598d553a667e38cafa997cfec55fe", size = 7418, upload-time = "2024-01-21T14:25:19.227Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/c4/c2971a3ba4c6103a3d10c4b0f24f461ddc027f0f09763220cf35ca1401b3/nest_asyncio-1.6.0-py3-none-any.whl", hash = "sha256:87af6efd6b5e897c81050477ef65c62e2b2f35d51703cae01aff2905b1852e1c", size = 5195, upload-time = "2024-01-21T14:25:17.223Z" },
+]
+
+[[package]]
 name = "networkx"
 version = "3.4.2"
 source = { registry = "https://pypi.org/simple" }
@@ -4190,6 +4217,7 @@ dependencies = [
     { name = "eclipse-zenoh" },
     { name = "elevenlabs" },
     { name = "fastrtc" },
+    { name = "firecrawl-py" },
     { name = "gradio" },
     { name = "gradio-client" },
     { name = "huggingface-hub" },
@@ -4240,6 +4268,7 @@ requires-dist = [
     { name = "eclipse-zenoh", specifier = "==1.9.0" },
     { name = "elevenlabs", specifier = "==2.44.0" },
     { name = "fastrtc", specifier = ">=0.0.34" },
+    { name = "firecrawl-py", specifier = ">=4.22.3" },
     { name = "gradio", specifier = "==5.50.1.dev1" },
     { name = "gradio-client", specifier = ">=1.13.3" },
     { name = "huggingface-hub", specifier = "==1.3.0" },
