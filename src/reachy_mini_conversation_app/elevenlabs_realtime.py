@@ -582,6 +582,7 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
                 },
                 "turn": {
                     "turn_timeout": 7,
+                    "mode": "turn",  # "turn" enables barge-in interruption (default)
                 },
             },
         }
