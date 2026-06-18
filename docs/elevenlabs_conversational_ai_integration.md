@@ -112,6 +112,7 @@ The agent configuration includes:
 | First message | `Hello! I'm Reachy Loco. How can I help you?` |
 | Language | `en` |
 | TTS model | `ELEVENLABS_TTS_MODEL`, currently `eleven_v3_conversational` |
+| Expressive mode | Enabled for v3 conversational TTS |
 | Voice | Current app voice mapped to an ElevenLabs voice ID |
 | Turn model | `ELEVENLABS_TURN_MODEL`, currently `turn_v3` |
 | Turn mode | `turn` with `turn_timeout=7` |
