@@ -135,7 +135,7 @@ Copy `.env.example` to `.env` when you want to switch backends, provide API keys
 | `ELEVENLABS_AGENT_ID` | Optional. Reuses an existing ElevenLabs agent; if unset, the app creates one and persists the ID. |
 | `ELEVENLABS_API_BASE_URL` | Optional custom ElevenLabs API base URL, for example EU residency endpoints. |
 | `BACKEND_PROVIDER` | Realtime backend to use: `huggingface` (default), `openai`, `gemini`, or `elevenlabs`. |
-| `MODEL_NAME` | Optional model override for OpenAI Realtime, Gemini Live, or the ElevenLabs agent LLM. Defaults to `gpt-realtime-2` for OpenAI, `gemini-3.1-flash-live-preview` for Gemini, and `gpt-4o-mini` for ElevenLabs. Hugging Face uses the server's model selection. |
+| `MODEL_NAME` | Optional model override for OpenAI Realtime or Gemini Live. Defaults to `gpt-realtime-2` for OpenAI and `gemini-3.1-flash-live-preview` for Gemini. Hugging Face uses the server's model selection. The ElevenLabs handler currently provisions its agent with `gpt-4o-mini`. |
 | `REALTIME_TRANSCRIPTION_LANGUAGE` | Optional input transcription language for realtime backends. Defaults to `en`; set to a backend-supported code such as `zh` for Chinese. |
 | `HF_REALTIME_CONNECTION_MODE` | Hugging Face connection selector: `deployed` uses the built-in Hugging Face server; `local` uses `HF_REALTIME_WS_URL`. Defaults to `deployed`. |
 | `HF_REALTIME_WS_URL` | Direct websocket endpoint for your own Hugging Face backend. Accepts either a base URL like `ws://127.0.0.1:8765/v1` or the full websocket URL `ws://127.0.0.1:8765/v1/realtime`. Used when `HF_REALTIME_CONNECTION_MODE=local`. |
@@ -196,6 +196,8 @@ ELEVENLABS_API_KEY=<your-key>
 ```
 
 On first launch, the app creates or updates an ElevenLabs agent using the active profile instructions and enabled tools. If `ELEVENLABS_AGENT_ID` is unset, the new agent ID is written to `.env` when possible.
+
+For implementation details, including the SDK boundary, agent provisioning, audio flow, and tool-call flow, see [ElevenLabs Conversational AI Integration](docs/elevenlabs_conversational_ai_integration.md).
 
 ## Running the app
 
