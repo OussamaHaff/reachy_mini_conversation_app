@@ -5,42 +5,42 @@ while preserving the full tool-calling infrastructure for robot motor control.
 """
 
 from __future__ import annotations
-
+import os
 import json
-import uuid
 import base64
 import asyncio
 import logging
+from typing import Any, Dict, Final, Tuple, Literal, Callable, Optional, Awaitable
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Final, Literal, Optional, Tuple
 
-import cv2
 import numpy as np
-import gradio as gr
-from elevenlabs import ElevenLabs, AsyncElevenLabs
-from elevenlabs.conversational_ai.conversation import (
-    AsyncConversation,
-    AsyncAudioInterface,
-    ClientTools,
-    ConversationInitiationData,
-)
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
+from elevenlabs import ElevenLabs
 from numpy.typing import NDArray
 from scipy.signal import resample
+from elevenlabs.conversational_ai.conversation import (
+    ClientTools,
+    AsyncConversation,
+    AsyncAudioInterface,
+    ConversationInitiationData,
+)
 
+from reachy_mini_conversation_app.tools import core_tools
 from reachy_mini_conversation_app.config import config
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
-from reachy_mini_conversation_app.tools.core_tools import (
-    ToolDependencies,
-    ALL_TOOLS,
-    get_tool_specs,
-    dispatch_tool_call,
-)
+from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, dispatch_tool_call
 from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
-from reachy_mini_conversation_app.tools.tool_constants import SystemTool
+
+
+try:
+    from reachy_mini_conversation_app.conversation_handler import ConversationHandler as _ConversationHandler
+except ImportError:  # Current branch before the origin/main conversation handler lands.
+    _ConversationHandler = AsyncStreamHandler
 
 
 logger = logging.getLogger(__name__)
+
+ELEVENLABS_BACKEND: Final[str] = "elevenlabs"
 
 # ElevenLabs Conversational AI uses 16 kHz PCM mono for both input and output
 ELEVENLABS_SAMPLE_RATE: Final[int] = 16000
@@ -62,6 +62,12 @@ _OPENAI_TO_ELEVENLABS_VOICE: Dict[str, str] = {
     "coral": "CwhRBWXzGAHq8TQ4Fs17",   # Roger
 }
 _DEFAULT_VOICE_ID: Final[str] = "IKne3meq5aSn9XLyUdCD"  # Charlie
+
+
+def _elevenlabs_config_value(name: str) -> str:
+    """Read an ElevenLabs runtime setting from config attrs or the environment."""
+    value = getattr(config, name, None) or os.getenv(name)
+    return str(value).strip() if value is not None else ""
 
 
 def _resolve_voice_id(voice_name: str | None) -> str:
@@ -86,7 +92,7 @@ def _client_kwargs(api_key: str) -> Dict[str, Any]:
     ``https://api.eu.residency.elevenlabs.io``).
     """
     kwargs: Dict[str, Any] = {"api_key": api_key}
-    base_url = (config.ELEVENLABS_API_BASE_URL or "").strip()
+    base_url = _elevenlabs_config_value("ELEVENLABS_API_BASE_URL")
     if base_url:
         kwargs["base_url"] = base_url
         logger.debug("ElevenLabs client using custom base_url: %s", base_url)
@@ -103,6 +109,22 @@ def _build_elevenlabs_tool(spec: Dict[str, Any]) -> Dict[str, Any]:
         "expects_response": True,
         "execution_mode": "immediate",
     }
+
+
+def _active_tool_specs(deps: ToolDependencies) -> list[dict[str, Any]]:
+    """Return tool specs using the newer active-tool filter when available."""
+    get_active_tool_specs = getattr(core_tools, "get_active_tool_specs", None)
+    if callable(get_active_tool_specs):
+        return get_active_tool_specs(deps)
+    return core_tools.get_tool_specs()
+
+
+def _session_instructions(instance_path: str | None) -> str:
+    """Call get_session_instructions across old and new signatures."""
+    try:
+        return get_session_instructions(instance_path)  # type: ignore[call-arg]
+    except TypeError:
+        return get_session_instructions()
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +144,7 @@ class FastRTCAudioInterface(AsyncAudioInterface):
         output_queue: "asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs]",
         head_wobbler: Any | None = None,
     ) -> None:
+        """Initialize the audio bridge and output queue."""
         self._input_callback: Callable[[bytes], Awaitable[None]] | None = None
         self._output_queue = output_queue
         self._head_wobbler = head_wobbler
@@ -176,7 +199,7 @@ class FastRTCAudioInterface(AsyncAudioInterface):
 # Main handler
 # ---------------------------------------------------------------------------
 
-class ElevenLabsRealtimeHandler(AsyncStreamHandler):
+class ElevenLabsRealtimeHandler(_ConversationHandler):
     """ElevenLabs Conversational AI handler for fastrtc ``Stream``.
 
     Drop-in replacement for ``OpenaiRealtimeHandler``:
@@ -191,7 +214,9 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
         deps: ToolDependencies,
         gradio_mode: bool = False,
         instance_path: Optional[str] = None,
+        startup_voice: Optional[str] = None,
     ) -> None:
+        """Initialize the ElevenLabs stream handler."""
         super().__init__(
             expected_layout="mono",
             output_sample_rate=ELEVENLABS_SAMPLE_RATE,
@@ -200,6 +225,9 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
         self.deps = deps
         self.gradio_mode = gradio_mode
         self.instance_path = instance_path
+        self._voice_override = startup_voice
+        self._clear_queue: Callable[[], None] | None = None
+        self._activity_observer: Callable[[str], None] | None = None
 
         # Audio/conversation state
         self.output_queue: asyncio.Queue[
@@ -230,11 +258,30 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
 
     def copy(self) -> "ElevenLabsRealtimeHandler":
         """Create a new handler copy (called by fastrtc for each new connection)."""
-        return ElevenLabsRealtimeHandler(self.deps, self.gradio_mode, self.instance_path)
+        return ElevenLabsRealtimeHandler(
+            self.deps,
+            self.gradio_mode,
+            self.instance_path,
+            startup_voice=self._voice_override,
+        )
+
+    def set_activity_observer(self, observer: Callable[[str], None] | None) -> None:
+        """Attach or detach an activity observer for the modern settings UI."""
+        self._activity_observer = observer
+
+    def _mark_activity(self, reason: str) -> None:
+        """Record conversation activity and notify observers when available."""
+        self.last_activity_time = asyncio.get_event_loop().time()
+        observer = self._activity_observer
+        if observer is not None:
+            try:
+                observer(reason)
+            except Exception:
+                logger.debug("activity observer raised (ignored)", exc_info=True)
 
     async def start_up(self) -> None:
         """Resolve the API key, ensure the agent exists, and run the conversation session."""
-        api_key = config.ELEVENLABS_API_KEY
+        api_key = _elevenlabs_config_value("ELEVENLABS_API_KEY")
 
         if self.gradio_mode and not api_key:
             await self.wait_for_args()  # type: ignore[no-untyped-call]
@@ -245,13 +292,13 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
                 self._key_source = "textbox"
                 self._provided_api_key = textbox_key
             else:
-                api_key = config.ELEVENLABS_API_KEY
+                api_key = _elevenlabs_config_value("ELEVENLABS_API_KEY")
 
         if not api_key or not api_key.strip():
             logger.warning("ELEVENLABS_API_KEY missing. Proceeding with a placeholder (tests/offline).")
             api_key = "DUMMY"
 
-        self.last_activity_time = asyncio.get_event_loop().time()
+        self._mark_activity("startup")
         self.start_time = asyncio.get_event_loop().time()
 
         try:
@@ -354,6 +401,21 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
         """Return the list of available ElevenLabs-mapped voice names."""
         return list(_OPENAI_TO_ELEVENLABS_VOICE.keys())
 
+    def get_current_voice(self) -> str:
+        """Return the current configured ElevenLabs voice name or voice ID."""
+        return self._voice_override or get_session_voice(default="cedar")
+
+    async def change_voice(self, voice: str) -> str:
+        """Change the ElevenLabs voice for the next session and reconnect if active."""
+        self._voice_override = voice
+        if self.conversation is not None:
+            try:
+                await self.conversation.end_session()
+            except Exception as exc:
+                logger.warning("Failed to restart ElevenLabs session for voice change: %s", exc)
+                return "Voice change failed. Will take effect on next connection."
+        return f"Voice changed to {voice}. Will take effect on reconnection."
+
     # ------------------------------------------------------------------
     # Idle signal
     # ------------------------------------------------------------------
@@ -387,14 +449,15 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
     # ------------------------------------------------------------------
 
     async def _on_agent_response(self, text: str) -> None:
-        """Called when the agent produces a complete utterance."""
+        """Handle a complete agent utterance."""
         logger.info("Agent response: %s", text[:200])
-        self.last_activity_time = asyncio.get_event_loop().time()
+        self._mark_activity("assistant_response")
         await self.output_queue.put(AdditionalOutputs({"role": "assistant", "content": text}))
 
     async def _on_user_transcript(self, transcript: str) -> None:
-        """Called when user speech is fully transcribed."""
+        """Handle a completed user transcript."""
         logger.info("User transcript: %s", transcript[:200])
+        self._mark_activity("user_transcript")
 
         # Cancel pending partial-transcript debounce task
         if self.partial_transcript_task and not self.partial_transcript_task.done():
@@ -425,7 +488,7 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
         """Establish and run the ElevenLabs conversation WebSocket session."""
         self._audio_interface = FastRTCAudioInterface(
             output_queue=self.output_queue,
-            head_wobbler=self.deps.head_wobbler,
+            head_wobbler=getattr(self.deps, "head_wobbler", None),
         )
 
         client_tools = self._build_client_tools()
@@ -436,7 +499,7 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
         # Override system prompt (and optionally voice) per session
         conversation_config_override: Dict[str, Any] = {
             "agent": {
-                "prompt": {"prompt": get_session_instructions()},
+                "prompt": {"prompt": _session_instructions(self.instance_path)},
             },
         }
 
@@ -486,9 +549,9 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
     def _build_client_tools(self) -> ClientTools:
         """Register all profile tools as ElevenLabs ``ClientTools`` async handlers."""
         client_tools = ClientTools()
-        _system_tool_names = {t.value for t in SystemTool}
 
-        for tool_name in list(ALL_TOOLS.keys()):
+        for spec in _active_tool_specs(self.deps):
+            tool_name = spec["name"]
             name = tool_name  # capture for closure
 
             async def _handler(params: dict, _name: str = name) -> str:
@@ -514,13 +577,6 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
                 # Special-case camera: ElevenLabs cannot receive images, but we can
                 # display the captured frame in the Gradio UI and swap the result.
                 if _name == "camera" and isinstance(result, dict) and "b64_im" in result:
-                    if self.deps.camera_worker is not None:
-                        np_img = self.deps.camera_worker.get_latest_frame()
-                        if np_img is not None:
-                            rgb_frame = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB)
-                            await self.output_queue.put(
-                                AdditionalOutputs({"role": "assistant", "content": gr.Image(value=rgb_frame)})
-                            )
                     result = {
                         "description": (
                             "Image captured. "
@@ -540,8 +596,9 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
                 )
 
                 # Re-sync head wobble after any tool that may have taken time
-                if self.deps.head_wobbler is not None:
-                    self.deps.head_wobbler.reset()
+                head_wobbler = getattr(self.deps, "head_wobbler", None)
+                if head_wobbler is not None:
+                    head_wobbler.reset()
 
                 return json.dumps(result)
 
@@ -560,9 +617,9 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
         """
         client = ElevenLabs(**_client_kwargs(api_key))
 
-        el_tools = [_build_elevenlabs_tool(spec) for spec in get_tool_specs()]
-        instructions = get_session_instructions()
-        voice_id = _resolve_voice_id(get_session_voice())
+        el_tools = [_build_elevenlabs_tool(spec) for spec in _active_tool_specs(self.deps)]
+        instructions = _session_instructions(self.instance_path)
+        voice_id = _resolve_voice_id(self._voice_override or get_session_voice(default="cedar"))
 
         agent_config: Dict[str, Any] = {
             "name": "Reachy Loco",
@@ -587,7 +644,7 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
             },
         }
 
-        existing_id = config.ELEVENLABS_AGENT_ID
+        existing_id = _elevenlabs_config_value("ELEVENLABS_AGENT_ID")
         if existing_id and existing_id.strip():
             logger.info("Updating existing ElevenLabs agent: %s", existing_id)
             try:
@@ -608,7 +665,7 @@ class ElevenLabsRealtimeHandler(AsyncStreamHandler):
         logger.info("Created ElevenLabs agent: %s", new_id)
 
         # Persist the new agent ID so future runs reuse it
-        config.ELEVENLABS_AGENT_ID = new_id  # type: ignore[attr-defined]
+        setattr(config, "ELEVENLABS_AGENT_ID", new_id)
         self._persist_agent_id_to_env(new_id)
         return new_id
 

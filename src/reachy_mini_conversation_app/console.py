@@ -44,6 +44,17 @@ except Exception:  # pragma: no cover - only loaded when settings_app is used
 logger = logging.getLogger(__name__)
 
 
+def _elevenlabs_config_value(name: str) -> str:
+    """Read an ElevenLabs runtime setting from config attrs or the environment."""
+    value = getattr(config, name, None) or os.getenv(name)
+    return str(value).strip() if value is not None else ""
+
+
+def _has_elevenlabs_api_key() -> bool:
+    """Return whether an ElevenLabs API key is available at runtime."""
+    return bool(_elevenlabs_config_value("ELEVENLABS_API_KEY"))
+
+
 class LocalStream:
     """LocalStream using Reachy Mini's recorder/player."""
 
@@ -128,7 +139,7 @@ class LocalStream:
         except Exception:  # best-effort
             pass
         try:
-            config.ELEVENLABS_API_KEY = k
+            setattr(config, "ELEVENLABS_API_KEY", k)
         except Exception:
             pass
 
@@ -255,8 +266,7 @@ class LocalStream:
         # GET /status -> whether key is set
         @self._settings_app.get("/status")
         def _status() -> JSONResponse:
-            has_key = bool(config.ELEVENLABS_API_KEY and str(config.ELEVENLABS_API_KEY).strip())
-            return JSONResponse({"has_key": has_key})
+            return JSONResponse({"has_key": _has_elevenlabs_api_key()})
 
         # GET /ready -> whether backend finished loading tools
         @self._settings_app.get("/ready")
@@ -288,7 +298,9 @@ class LocalStream:
             try:
                 import httpx
 
-                base_url = (config.ELEVENLABS_API_BASE_URL or "https://api.elevenlabs.io").rstrip("/")
+                base_url = (
+                    _elevenlabs_config_value("ELEVENLABS_API_BASE_URL") or "https://api.elevenlabs.io"
+                ).rstrip("/")
                 headers = {"xi-api-key": key, "Content-Type": "application/json"}
                 async with httpx.AsyncClient(timeout=10.0) as http_client:
                     response = await http_client.get(
@@ -330,7 +342,7 @@ class LocalStream:
                     new_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
                     if new_key:
                         try:
-                            config.ELEVENLABS_API_KEY = new_key
+                            setattr(config, "ELEVENLABS_API_KEY", new_key)
                         except Exception:
                             pass
                     if LOCKED_PROFILE is None:
@@ -347,11 +359,11 @@ class LocalStream:
         self._init_settings_ui_if_needed()
 
         # If key is still missing -> wait until provided via the settings UI
-        if not (config.ELEVENLABS_API_KEY and str(config.ELEVENLABS_API_KEY).strip()):
+        if not _has_elevenlabs_api_key():
             logger.warning("ELEVENLABS_API_KEY not found. Open the app settings page to enter it.")
             # Poll until the key becomes available (set via the settings UI)
             try:
-                while not (config.ELEVENLABS_API_KEY and str(config.ELEVENLABS_API_KEY).strip()):
+                while not _has_elevenlabs_api_key():
                     time.sleep(0.2)
             except KeyboardInterrupt:
                 logger.info("Interrupted while waiting for API key.")
