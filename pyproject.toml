@@ -21,7 +21,7 @@ dependencies = [
     "python-dotenv",
 
     #ElevenLabs (conversational AI)
-    "elevenlabs==2.44.0",
+    "elevenlabs==2.52.0",
 
     #OpenAI
     "openai>=2.30.0",

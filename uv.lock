@@ -13,7 +13,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-06-11T21:30:25.46267Z"
+exclude-newer = "2026-06-11T22:02:42.681494Z"
 exclude-newer-span = "P7D"
 
 [options.exclude-newer-package]
@@ -965,7 +965,7 @@ wheels = [
 
 [[package]]
 name = "elevenlabs"
-version = "2.44.0"
+version = "2.52.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -975,9 +975,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a8/ea/e6283ef10e1e6d13639e80c5ac562c49cd932626c8d7b3a6f18d83aeb8e0/elevenlabs-2.44.0.tar.gz", hash = "sha256:1e061032aadbfed8e435ec1c5986bcf09937f921c7ef02d3750a55fba4be051a", size = 551614, upload-time = "2026-04-21T11:00:49.98Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/eb/8673dac4b69c1bd8f4d7257fe876e2d5d688d97c496296056ecbd12f67fd/elevenlabs-2.52.0.tar.gz", hash = "sha256:8cbb22418a9ff51251f5e524fe88505bd70be1c4c180b7ebe7998110c8330bee", size = 632488, upload-time = "2026-06-09T09:44:45.405Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/83/3c/0f637dbfb61bbe3491accd31e430b0dcfcc7d77377d2c58980d6fe50fdab/elevenlabs-2.44.0-py3-none-any.whl", hash = "sha256:289ba6cdcdd2f809e1e3f18571a273aa5bad4ccff8070d4c2830798695c058fe", size = 1513401, upload-time = "2026-04-21T11:00:47.855Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/e3/e6aaadb21d2b3f190edf4dcecf83290d2ea8bbc11b6d1fcf807ff7f33fed/elevenlabs-2.52.0-py3-none-any.whl", hash = "sha256:c9c8048431dadea691a1561b44e775240c012a1eaa84159d67a1ee935bed3b3f", size = 1715594, upload-time = "2026-06-09T09:44:43.416Z" },
 ]
 
 [[package]]
@@ -4277,7 +4277,7 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'local-vision'", specifier = ">=1.13.0" },
     { name = "aiortc", specifier = ">=1.13.0" },
     { name = "av" },
-    { name = "elevenlabs", specifier = "==2.44.0" },
+    { name = "elevenlabs", specifier = "==2.52.0" },
     { name = "fastrtc", specifier = ">=0.0.34" },
     { name = "google-genai", specifier = ">=1.0.0" },
     { name = "httpx", specifier = ">=0.28.1" },
