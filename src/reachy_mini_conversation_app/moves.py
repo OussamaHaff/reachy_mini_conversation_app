@@ -55,7 +55,7 @@ from reachy_mini.utils.interpolation import (
 logger = logging.getLogger(__name__)
 
 # Configuration constants
-CONTROL_LOOP_FREQUENCY_HZ = 100.0  # Hz - Target frequency for the movement control loop
+CONTROL_LOOP_FREQUENCY_HZ = 60.0  # Hz - Target frequency for the movement control loop
 
 # Type definitions
 FullBodyPose = Tuple[NDArray[np.float32], Tuple[float, float], float]  # (head_pose_4x4, antennas, body_yaw)
@@ -84,7 +84,7 @@ class BreathingMove(Move):  # type: ignore
 
         # Neutral positions for breathing base
         self.neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-        self.neutral_antennas = np.array([0.0, 0.0])
+        self.neutral_antennas = np.array([-0.1745, 0.1745])  # ~10° offset to reduce shaking
 
         # Breathing parameters
         self.breathing_z_amplitude = 0.005  # 5mm gentle breathing
@@ -105,7 +105,9 @@ class BreathingMove(Move):  # type: ignore
 
             # Interpolate head pose
             head_pose = linear_pose_interpolation(
-                self.interpolation_start_pose, self.neutral_head_pose, interpolation_t,
+                self.interpolation_start_pose,
+                self.neutral_head_pose,
+                interpolation_t,
             )
 
             # Interpolate antennas
@@ -147,7 +149,7 @@ def combine_full_body(primary_pose: FullBodyPose, secondary_pose: FullBodyPose) 
     # Combine head poses using compose_world_offset; the secondary pose must be an
     # offset expressed in the world frame (T_off_world) applied to the absolute
     # primary transform (T_abs).
-    combined_head = compose_world_offset(primary_head, secondary_head, reorthonormalize=True)
+    combined_head = compose_world_offset(primary_head, secondary_head, reorthonormalize=False)
 
     # Sum antennas and body_yaw
     combined_antennas = (
@@ -175,14 +177,6 @@ class MovementState:
     last_activity_time: float = 0.0
 
     # Secondary move state (offsets)
-    speech_offsets: Tuple[float, float, float, float, float, float] = (
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-    )
     face_tracking_offsets: Tuple[float, float, float, float, float, float] = (
         0.0,
         0.0,
@@ -281,20 +275,11 @@ class MovementManager:
         self._last_set_target_err = 0.0
         self._set_target_err_interval = 1.0  # seconds between error logs
         self._set_target_err_suppressed = 0
+        self._cached_secondary_offsets: tuple[float, ...] = ()  # force miss on first call
+        self._cached_secondary_pose: FullBodyPose = (np.eye(4, dtype=np.float32), (0.0, 0.0), 0.0)
 
         # Cross-thread signalling
         self._command_queue: "Queue[Tuple[str, Any]]" = Queue()
-        self._speech_offsets_lock = threading.Lock()
-        self._pending_speech_offsets: Tuple[float, float, float, float, float, float] = (
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-        )
-        self._speech_offsets_dirty = False
-
         self._face_offsets_lock = threading.Lock()
         self._pending_face_offsets: Tuple[float, float, float, float, float, float] = (
             0.0,
@@ -327,16 +312,6 @@ class MovementManager:
         Thread-safe: executed by the worker thread via the command queue.
         """
         self._command_queue.put(("clear_queue", None))
-
-    def set_speech_offsets(self, offsets: Tuple[float, float, float, float, float, float]) -> None:
-        """Update speech-induced secondary offsets (x, y, z, roll, pitch, yaw).
-
-        Offsets are interpreted as metres for translation and radians for
-        rotation in the world frame. Thread-safe via a pending snapshot.
-        """
-        with self._speech_offsets_lock:
-            self._pending_speech_offsets = offsets
-            self._speech_offsets_dirty = True
 
     def set_moving_state(self, duration: float) -> None:
         """Mark the robot as actively moving for the provided duration.
@@ -384,17 +359,7 @@ class MovementManager:
             self._handle_command(command, payload, current_time)
 
     def _apply_pending_offsets(self) -> None:
-        """Apply the most recent speech/face offset updates."""
-        speech_offsets: Tuple[float, float, float, float, float, float] | None = None
-        with self._speech_offsets_lock:
-            if self._speech_offsets_dirty:
-                speech_offsets = self._pending_speech_offsets
-                self._speech_offsets_dirty = False
-
-        if speech_offsets is not None:
-            self.state.speech_offsets = speech_offsets
-            self.state.update_activity()
-
+        """Apply the most recent face offset update."""
         face_offsets: Tuple[float, float, float, float, float, float] | None = None
         with self._face_offsets_lock:
             if self._face_offsets_dirty:
@@ -538,7 +503,7 @@ class MovementManager:
             if head is None:
                 head = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
             if antennas is None:
-                antennas = np.array([0.0, 0.0])
+                antennas = np.array([-0.1745, 0.1745])  # ~10° offset
             if body_yaw is None:
                 body_yaw = 0.0
 
@@ -562,28 +527,26 @@ class MovementManager:
         return primary_full_body_pose
 
     def _get_secondary_pose(self) -> FullBodyPose:
-        """Get the secondary full body pose from speech and face tracking offsets."""
-        # Combine speech sway offsets + face tracking offsets for secondary pose
-        secondary_offsets = [
-            self.state.speech_offsets[0] + self.state.face_tracking_offsets[0],
-            self.state.speech_offsets[1] + self.state.face_tracking_offsets[1],
-            self.state.speech_offsets[2] + self.state.face_tracking_offsets[2],
-            self.state.speech_offsets[3] + self.state.face_tracking_offsets[3],
-            self.state.speech_offsets[4] + self.state.face_tracking_offsets[4],
-            self.state.speech_offsets[5] + self.state.face_tracking_offsets[5],
-        ]
+        """Get the secondary full body pose from face tracking offsets."""
+        current_offsets = self.state.face_tracking_offsets
+
+        # Skip expensive create_head_pose if offsets unchanged since last tick
+        if current_offsets == self._cached_secondary_offsets:
+            return self._cached_secondary_pose
 
         secondary_head_pose = create_head_pose(
-            x=secondary_offsets[0],
-            y=secondary_offsets[1],
-            z=secondary_offsets[2],
-            roll=secondary_offsets[3],
-            pitch=secondary_offsets[4],
-            yaw=secondary_offsets[5],
+            x=current_offsets[0],
+            y=current_offsets[1],
+            z=current_offsets[2],
+            roll=current_offsets[3],
+            pitch=current_offsets[4],
+            yaw=current_offsets[5],
             degrees=False,
             mm=False,
         )
-        return (secondary_head_pose, (0.0, 0.0), 0.0)
+        self._cached_secondary_offsets = current_offsets
+        self._cached_secondary_pose = (secondary_head_pose, (0.0, 0.0), 0.0)
+        return self._cached_secondary_pose
 
     def _compose_full_body_pose(self, current_time: float) -> FullBodyPose:
         """Compose primary and secondary poses into a single command pose."""
@@ -632,7 +595,9 @@ class MovementManager:
 
         return antennas_cmd
 
-    def _issue_control_command(self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float) -> None:
+    def _issue_control_command(
+        self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float
+    ) -> None:
         """Send the fused pose to the robot with throttled error logging."""
         try:
             self.current_robot.set_target(head=head, antennas=antennas, body_yaw=body_yaw)
@@ -652,7 +617,10 @@ class MovementManager:
                 self._last_commanded_pose = clone_full_body_pose((head, antennas, body_yaw))
 
     def _update_frequency_stats(
-        self, loop_start: float, prev_loop_start: float, stats: LoopFrequencyStats,
+        self,
+        loop_start: float,
+        prev_loop_start: float,
+        stats: LoopFrequencyStats,
     ) -> LoopFrequencyStats:
         """Update frequency statistics based on the current loop start time."""
         period = loop_start - prev_loop_start
@@ -746,7 +714,7 @@ class MovementManager:
         # Reset to neutral position using goto_target (same approach as wake_up)
         try:
             neutral_head_pose = create_head_pose(0, 0, 0, 0, 0, 0, degrees=True)
-            neutral_antennas = [0.0, 0.0]
+            neutral_antennas = [-0.1745, 0.1745]  # ~10° offset to reduce shaking
             neutral_body_yaw = 0.0
 
             # Use goto_target directly on the robot

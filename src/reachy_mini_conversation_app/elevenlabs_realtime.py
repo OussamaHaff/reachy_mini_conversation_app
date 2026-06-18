@@ -26,7 +26,15 @@ from elevenlabs.conversational_ai.conversation import (
 )
 
 from reachy_mini_conversation_app.tools import core_tools
-from reachy_mini_conversation_app.config import config
+from reachy_mini_conversation_app.config import (
+    ELEVENLABS_BACKEND,
+    ELEVENLABS_API_KEY_ENV,
+    ELEVENLABS_AGENT_ID_ENV,
+    ELEVENLABS_API_BASE_URL_ENV,
+    config,
+    get_default_voice_for_backend,
+    get_available_voices_for_backend,
+)
 from reachy_mini_conversation_app.prompts import get_session_voice, get_session_instructions
 from reachy_mini_conversation_app.tools.core_tools import ToolDependencies, dispatch_tool_call
 from reachy_mini_conversation_app.tools.background_tool_manager import BackgroundToolManager
@@ -40,8 +48,6 @@ except ImportError:  # Current branch before the origin/main conversation handle
 
 logger = logging.getLogger(__name__)
 
-ELEVENLABS_BACKEND: Final[str] = "elevenlabs"
-
 # ElevenLabs Conversational AI uses 16 kHz PCM mono for both input and output
 ELEVENLABS_SAMPLE_RATE: Final[int] = 16000
 
@@ -53,13 +59,13 @@ ELEVENLABS_LLM_MODEL: Final[str] = "gpt-4o-mini"
 
 # Map OpenAI voice names → ElevenLabs voice IDs (used when voice.txt contains an OpenAI name)
 _OPENAI_TO_ELEVENLABS_VOICE: Dict[str, str] = {
-    "cedar": "IKne3meq5aSn9XLyUdCD",   # Charlie (warm, conversational)
-    "alloy": "21m00Tcm4TlvDq8ikWAM",   # Rachel (neutral)
-    "aria":  "9BWtsMINqrJLrRacOk9x",   # Aria
+    "cedar": "IKne3meq5aSn9XLyUdCD",  # Charlie (warm, conversational)
+    "alloy": "21m00Tcm4TlvDq8ikWAM",  # Rachel (neutral)
+    "aria": "9BWtsMINqrJLrRacOk9x",  # Aria
     "ballad": "TX3LPaxmHKxFdv7VOQHJ",  # Liam
-    "verse": "pFZP5JQG7iQjIQuC4Bku",   # Lily
-    "sage":  "XrExE9yKIg1WjnnlVkGX",   # Matilda
-    "coral": "CwhRBWXzGAHq8TQ4Fs17",   # Roger
+    "verse": "pFZP5JQG7iQjIQuC4Bku",  # Lily
+    "sage": "XrExE9yKIg1WjnnlVkGX",  # Matilda
+    "coral": "CwhRBWXzGAHq8TQ4Fs17",  # Roger
 }
 _DEFAULT_VOICE_ID: Final[str] = "IKne3meq5aSn9XLyUdCD"  # Charlie
 
@@ -92,7 +98,7 @@ def _client_kwargs(api_key: str) -> Dict[str, Any]:
     ``https://api.eu.residency.elevenlabs.io``).
     """
     kwargs: Dict[str, Any] = {"api_key": api_key}
-    base_url = _elevenlabs_config_value("ELEVENLABS_API_BASE_URL")
+    base_url = _elevenlabs_config_value(ELEVENLABS_API_BASE_URL_ENV)
     if base_url:
         kwargs["base_url"] = base_url
         logger.debug("ElevenLabs client using custom base_url: %s", base_url)
@@ -130,6 +136,7 @@ def _session_instructions(instance_path: str | None) -> str:
 # ---------------------------------------------------------------------------
 # Custom audio interface bridging fastrtc ↔ ElevenLabs
 # ---------------------------------------------------------------------------
+
 
 class FastRTCAudioInterface(AsyncAudioInterface):
     """Bridges fastrtc audio with ElevenLabs ``AsyncConversation``.
@@ -199,6 +206,7 @@ class FastRTCAudioInterface(AsyncAudioInterface):
 # Main handler
 # ---------------------------------------------------------------------------
 
+
 class ElevenLabsRealtimeHandler(_ConversationHandler):
     """ElevenLabs Conversational AI handler for fastrtc ``Stream``.
 
@@ -230,9 +238,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
         self._activity_observer: Callable[[str], None] | None = None
 
         # Audio/conversation state
-        self.output_queue: asyncio.Queue[
-            Tuple[int, NDArray[np.int16]] | AdditionalOutputs
-        ] = asyncio.Queue()
+        self.output_queue: asyncio.Queue[Tuple[int, NDArray[np.int16]] | AdditionalOutputs] = asyncio.Queue()
         self._audio_interface: FastRTCAudioInterface | None = None
         self.conversation: AsyncConversation | None = None
         self.tool_manager = BackgroundToolManager()
@@ -281,7 +287,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
 
     async def start_up(self) -> None:
         """Resolve the API key, ensure the agent exists, and run the conversation session."""
-        api_key = _elevenlabs_config_value("ELEVENLABS_API_KEY")
+        api_key = _elevenlabs_config_value(ELEVENLABS_API_KEY_ENV)
 
         if self.gradio_mode and not api_key:
             await self.wait_for_args()  # type: ignore[no-untyped-call]
@@ -292,7 +298,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
                 self._key_source = "textbox"
                 self._provided_api_key = textbox_key
             else:
-                api_key = _elevenlabs_config_value("ELEVENLABS_API_KEY")
+                api_key = _elevenlabs_config_value(ELEVENLABS_API_KEY_ENV)
 
         if not api_key or not api_key.strip():
             logger.warning("ELEVENLABS_API_KEY missing. Proceeding with a placeholder (tests/offline).")
@@ -302,9 +308,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
         self.start_time = asyncio.get_event_loop().time()
 
         try:
-            agent_id = await asyncio.get_event_loop().run_in_executor(
-                None, self._ensure_agent_sync, api_key
-            )
+            agent_id = await asyncio.get_event_loop().run_in_executor(None, self._ensure_agent_sync, api_key)
         except Exception as exc:
             logger.error("Failed to ensure ElevenLabs agent: %s", exc)
             return
@@ -384,6 +388,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
         """
         try:
             from reachy_mini_conversation_app.config import set_custom_profile
+
             set_custom_profile(profile)
             logger.info("Set custom profile to %r", profile)
 
@@ -399,11 +404,11 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
 
     async def get_available_voices(self) -> list[str]:
         """Return the list of available ElevenLabs-mapped voice names."""
-        return list(_OPENAI_TO_ELEVENLABS_VOICE.keys())
+        return get_available_voices_for_backend(ELEVENLABS_BACKEND)
 
     def get_current_voice(self) -> str:
         """Return the current configured ElevenLabs voice name or voice ID."""
-        return self._voice_override or get_session_voice(default="cedar")
+        return self._voice_override or get_session_voice(default=get_default_voice_for_backend(ELEVENLABS_BACKEND))
 
     async def change_voice(self, voice: str) -> str:
         """Change the ElevenLabs voice for the next session and reconnect if active."""
@@ -474,9 +479,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
         try:
             await asyncio.sleep(self.partial_debounce_delay)
             if self.partial_transcript_sequence == sequence:
-                await self.output_queue.put(
-                    AdditionalOutputs({"role": "user_partial", "content": transcript})
-                )
+                await self.output_queue.put(AdditionalOutputs({"role": "user_partial", "content": transcript}))
         except asyncio.CancelledError:
             raise
 
@@ -577,12 +580,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
                 # Special-case camera: ElevenLabs cannot receive images, but we can
                 # display the captured frame in the Gradio UI and swap the result.
                 if _name == "camera" and isinstance(result, dict) and "b64_im" in result:
-                    result = {
-                        "description": (
-                            "Image captured. "
-                            "Run with --local-vision for AI-based visual analysis."
-                        )
-                    }
+                    result = {"description": ("Image captured. Run with --local-vision for AI-based visual analysis.")}
 
                 # Emit the tool result to the chatbot UI
                 await self.output_queue.put(
@@ -619,7 +617,9 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
 
         el_tools = [_build_elevenlabs_tool(spec) for spec in _active_tool_specs(self.deps)]
         instructions = _session_instructions(self.instance_path)
-        voice_id = _resolve_voice_id(self._voice_override or get_session_voice(default="cedar"))
+        voice_id = _resolve_voice_id(
+            self._voice_override or get_session_voice(default=get_default_voice_for_backend(ELEVENLABS_BACKEND))
+        )
 
         agent_config: Dict[str, Any] = {
             "name": "Reachy Loco",
@@ -644,7 +644,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
             },
         }
 
-        existing_id = _elevenlabs_config_value("ELEVENLABS_AGENT_ID")
+        existing_id = _elevenlabs_config_value(ELEVENLABS_AGENT_ID_ENV)
         if existing_id and existing_id.strip():
             logger.info("Updating existing ElevenLabs agent: %s", existing_id)
             try:
@@ -655,9 +655,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
                 logger.info("Agent updated: %s", existing_id)
                 return existing_id
             except Exception as exc:
-                logger.warning(
-                    "Failed to update agent %s (%s). Creating a new one.", existing_id, exc
-                )
+                logger.warning("Failed to update agent %s (%s). Creating a new one.", existing_id, exc)
 
         logger.info("Creating new ElevenLabs agent")
         agent = client.conversational_ai.agents.create(**agent_config)
@@ -665,7 +663,7 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
         logger.info("Created ElevenLabs agent: %s", new_id)
 
         # Persist the new agent ID so future runs reuse it
-        setattr(config, "ELEVENLABS_AGENT_ID", new_id)
+        setattr(config, ELEVENLABS_AGENT_ID_ENV, new_id)
         self._persist_agent_id_to_env(new_id)
         return new_id
 
@@ -685,19 +683,20 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
                 lines = env_path.read_text(encoding="utf-8").splitlines()
                 replaced = False
                 for i, line in enumerate(lines):
-                    if line.strip().startswith("ELEVENLABS_AGENT_ID="):
-                        lines[i] = f"ELEVENLABS_AGENT_ID={agent_id}"
+                    if line.strip().startswith(f"{ELEVENLABS_AGENT_ID_ENV}="):
+                        lines[i] = f"{ELEVENLABS_AGENT_ID_ENV}={agent_id}"
                         replaced = True
                         break
                 if not replaced:
-                    lines.append(f"ELEVENLABS_AGENT_ID={agent_id}")
+                    lines.append(f"{ELEVENLABS_AGENT_ID_ENV}={agent_id}")
                 env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-                logger.info("Persisted ELEVENLABS_AGENT_ID=%s to %s", agent_id, env_path)
+                logger.info("Persisted %s=%s to %s", ELEVENLABS_AGENT_ID_ENV, agent_id, env_path)
                 return
 
             # No .env found; just log
             logger.info(
-                "No .env file found; ELEVENLABS_AGENT_ID=%s not persisted (add it manually).",
+                "No .env file found; %s=%s not persisted (add it manually).",
+                ELEVENLABS_AGENT_ID_ENV,
                 agent_id,
             )
         except Exception as exc:

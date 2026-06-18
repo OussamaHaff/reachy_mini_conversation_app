@@ -2,7 +2,9 @@ name: Sync to Hugging Face Space
 
 on:
   push:
-    branches: [main]
+    tags:
+      - v*
+  workflow_dispatch:
 
 concurrency:
   group: hf-sync-${{ github.ref }}
@@ -15,14 +17,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
         with:
           lfs: true
       - name: Sync GitHub to Hugging Face Hub
-        uses: huggingface/hub-sync@v0.1.0
+        uses: huggingface/hub-sync@64269e310f79686d68ea78fd189cd1dd7d5ce427  # v0.2.0
         with:
           github_repo_id: pollen-robotics/reachy_mini_conversation_app
           huggingface_repo_id: pollen-robotics/reachy_mini_conversation_app
           hf_token: ${{ secrets.HF_TOKEN }}
           repo_type: space
-          space_sdk: gradio
+          space_sdk: static

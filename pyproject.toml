@@ -72,6 +72,14 @@ dev = [
 [project.scripts]
 reachy-mini-conversation-app = "reachy_mini_conversation_app.main:main"
 
+[tool.uv]
+exclude-newer = "7 days"
+
+[tool.uv.exclude-newer-package]
+"reachy-mini" = "2099-12-31T23:59:59Z"
+"reachy-mini-dances-library" = "2099-12-31T23:59:59Z"
+"reachy-mini-toolbox" = "2099-12-31T23:59:59Z"
+
 [project.entry-points."reachy_mini_apps"]
 reachy_mini_conversation_app = "reachy_mini_conversation_app.main:ReachyMiniConversationApp"
 
@@ -84,13 +92,13 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 reachy_mini_conversation_app = [
-  "images/*",
-  "static/*",
+  "static/**/*",
   ".env.example",
-  "demos/**/*.txt",
-  "prompts_library/*.txt",
-  "profiles/**/*.txt",
   "prompts/**/*.txt",
+]
+reachy_talk_data = [
+  "profiles/**/*.txt",
+  "profiles/**/*.py",
 ]
 
 [tool.ruff]
@@ -126,14 +134,6 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
-
-[tool.uv]
-required-environments = [
-  "sys_platform == 'darwin' and platform_machine == 'arm64'",
-]
-override-dependencies = [
-  "gstreamer-msvc-runtime ; sys_platform == 'win32'",
-]
 
 [tool.mypy]
 python_version = "3.12"

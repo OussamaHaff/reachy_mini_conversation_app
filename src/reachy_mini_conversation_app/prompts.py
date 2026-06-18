@@ -3,7 +3,8 @@ import sys
 import logging
 from pathlib import Path
 
-from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config
+from reachy_mini_conversation_app.config import DEFAULT_PROFILES_DIRECTORY, config, get_default_voice_for_backend
+from reachy_mini_conversation_app.memory import format_memory_for_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -27,9 +28,9 @@ def _expand_prompt_includes(content: str) -> str:
     # Pattern to match [<name>] where name is a valid file stem (alphanumeric, underscores, hyphens)
     # pattern = re.compile(r'^\[([a-zA-Z0-9_-]+)\]$')
     # Allow slashes for subdirectories
-    pattern = re.compile(r'^\[([a-zA-Z0-9/_-]+)\]$')
+    pattern = re.compile(r"^\[([a-zA-Z0-9/_-]+)\]$")
 
-    lines = content.split('\n')
+    lines = content.split("\n")
     expanded_lines = []
 
     for line in lines:
@@ -55,10 +56,10 @@ def _expand_prompt_includes(content: str) -> str:
         else:
             expanded_lines.append(line)
 
-    return '\n'.join(expanded_lines)
+    return "\n".join(expanded_lines)
 
 
-def get_session_instructions() -> str:
+def get_session_instructions(instance_path: str | Path | None = None) -> str:
     """Get session instructions, loading from REACHY_MINI_CUSTOM_PROFILE if set."""
     profile = config.REACHY_MINI_CUSTOM_PROFILE
     if not profile:
@@ -73,7 +74,7 @@ def get_session_instructions() -> str:
             )
         else:
             logger.info(f"Loading prompt from profile '{profile}'")
-        instructions_file = config.PROFILES_DIRECTORY / profile / INSTRUCTIONS_FILENAME
+        instructions_file = config.resolve_profile_dir(profile) / INSTRUCTIONS_FILENAME
 
     try:
         if instructions_file.exists():
@@ -81,6 +82,9 @@ def get_session_instructions() -> str:
             if instructions:
                 # Expand [<name>] placeholders with content from prompts library
                 expanded_instructions = _expand_prompt_includes(instructions)
+                memory_prompt = format_memory_for_prompt(instance_path)
+                if memory_prompt:
+                    return f"{memory_prompt}\n\n{expanded_instructions}"
                 return expanded_instructions
             logger.error(f"Profile '{profile}' has empty {INSTRUCTIONS_FILENAME}")
             sys.exit(1)
@@ -91,20 +95,22 @@ def get_session_instructions() -> str:
         sys.exit(1)
 
 
-def get_session_voice(default: str = "cedar") -> str:
+def get_session_voice(default: str | None = None) -> str:
     """Resolve the voice to use for the session.
 
     If a custom profile is selected and contains a voice.txt, return its
-    trimmed content; otherwise return the provided default ("cedar").
+    trimmed content; otherwise return the provided default or the active
+    backend default voice.
     """
+    fallback = get_default_voice_for_backend() if default is None else default
     profile = config.REACHY_MINI_CUSTOM_PROFILE
     if not profile:
-        return default
+        return fallback
     try:
-        voice_file = config.PROFILES_DIRECTORY / profile / VOICE_FILENAME
+        voice_file = config.resolve_profile_dir(profile) / VOICE_FILENAME
         if voice_file.exists():
             voice = voice_file.read_text(encoding="utf-8").strip()
-            return voice or default
+            return voice or fallback
     except Exception:
         pass
-    return default
+    return fallback

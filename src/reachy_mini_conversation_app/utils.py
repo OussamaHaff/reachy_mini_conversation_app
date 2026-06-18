@@ -1,86 +1,155 @@
+from __future__ import annotations
+import sys
 import logging
 import argparse
 import warnings
-from typing import Any, Tuple, Optional
+import subprocess
+from typing import TYPE_CHECKING, Optional
 
 from reachy_mini import ReachyMini
 from reachy_mini_conversation_app.camera_worker import CameraWorker
+from reachy_mini_conversation_app.vision.head_tracking import HeadTracker
 
 
-def parse_args() -> Tuple[argparse.Namespace, list]:  # type: ignore
+if TYPE_CHECKING:
+    from reachy_mini_conversation_app.vision.local_vision import VisionProcessor
+
+
+class CameraVisionInitializationError(Exception):
+    """Raised when camera or vision setup fails in an expected way."""
+
+
+def parse_args() -> tuple[argparse.Namespace, list]:  # type: ignore
     """Parse command line arguments."""
     parser = argparse.ArgumentParser("Reachy Mini Conversation App")
     parser.add_argument(
         "--head-tracker",
-        choices=["yolo", "mediapipe", None],
+        choices=["yolo", "mediapipe"],
         default=None,
-        help="Choose head tracker (default: None)",
+        help=(
+            "Optional head-tracking backend: yolo uses a local face detector in a subprocess, "
+            "mediapipe uses reachy_mini_toolbox in process. Disabled by default."
+        ),
     )
     parser.add_argument("--no-camera", default=False, action="store_true", help="Disable camera usage")
     parser.add_argument(
         "--local-vision",
         default=False,
         action="store_true",
-        help="Use local vision model instead of gpt-realtime vision",
+        help="Use local vision model instead of the selected realtime backend vision",
     )
-    parser.add_argument("--gradio", default=False, action="store_true", help="Open gradio interface")
+    parser.add_argument(
+        "--ui", default=False, action="store_true", help="Serve the modern web UI at http://localhost:7860"
+    )
     parser.add_argument("--debug", default=False, action="store_true", help="Enable debug logging")
     parser.add_argument(
         "--robot-name",
         type=str,
         default=None,
-        help="[Optional] Robot name/prefix for Zenoh topics (must match daemon's --robot-name). Only needed for development with multiple robots.",
+        help="[Optional] Robot name to target. Must match the daemon's --robot-name when connecting to a specific robot, mainly useful for development with multiple robots.",
     )
     parser.add_argument(
         "--host",
         type=str,
         default=None,
-        help="[Optional] Robot hostname or IP address for wireless connection (e.g. reachy-mini.local or 192.168.1.42). When provided, forces network connection mode.",
+        help="[Optional] Robot hostname or IP address. When provided, forces network connection mode.",
     )
+    subparsers = parser.add_subparsers(dest="command")
+    tool_spaces_parser = subparsers.add_parser("tool-spaces", help="Manage installed Hugging Face Space tool sources")
+    tool_spaces_subparsers = tool_spaces_parser.add_subparsers(dest="tool_spaces_command", required=True)
+
+    add_parser = tool_spaces_subparsers.add_parser("add", help="Install one public Space tool source by slug")
+    add_parser.add_argument("space_slug", help="Public Hugging Face Space slug in the form owner/space-name")
+    add_parser.add_argument(
+        "--install-only",
+        action="store_true",
+        default=False,
+        help="Install the Space without enabling its tools in any profile.",
+    )
+    add_parser.add_argument(
+        "--profile",
+        dest="profile",
+        default=None,
+        metavar="PROFILE",
+        help="Enable tools in this profile instead of the active profile.",
+    )
+
+    remove_parser = tool_spaces_subparsers.add_parser("remove", help="Remove one installed Space tool source")
+    remove_parser.add_argument("space_slug", help="Installed Hugging Face Space slug in the form owner/space-name")
+
+    tool_spaces_subparsers.add_parser("list", help="List installed Space tool sources")
     return parser.parse_known_args()
 
 
-def handle_vision_stuff(args: argparse.Namespace, current_robot: ReachyMini) -> Tuple[CameraWorker | None, Any, Any]:
-    """Initialize camera, head tracker, camera worker, and vision manager.
-
-    By default, vision is handled by gpt-realtime model when camera tool is used.
-    If --local-vision flag is used, a local vision model will process images periodically.
-    """
-    camera_worker = None
-    head_tracker = None
-    vision_manager = None
+def initialize_camera_and_vision(
+    args: argparse.Namespace,
+    current_robot: ReachyMini,
+) -> tuple[CameraWorker | None, VisionProcessor | None]:
+    """Initialize camera capture, optional head tracking, and optional local vision."""
+    camera_worker: Optional[CameraWorker] = None
+    head_tracker: HeadTracker | None = None
+    vision_processor: Optional[VisionProcessor] = None
 
     if not args.no_camera:
-        # Initialize head tracker if specified
         if args.head_tracker is not None:
-            if args.head_tracker == "yolo":
-                from reachy_mini_conversation_app.vision.yolo_head_tracker import HeadTracker
+            try:
+                if args.head_tracker == "yolo":
+                    from reachy_mini_conversation_app.vision.head_tracking.yolo_process import (
+                        YoloHeadTrackerProcess,
+                    )
 
-                head_tracker = HeadTracker()
-            elif args.head_tracker == "mediapipe":
-                from reachy_mini_toolbox.vision import HeadTracker  # type: ignore[no-redef]
+                    head_tracker = YoloHeadTrackerProcess()
+                    logging.getLogger(__name__).info("Using yolo head tracker subprocess")
+                else:
+                    from reachy_mini_conversation_app.vision.head_tracking.mediapipe import (
+                        MediapipeHeadTracker,
+                    )
 
-                head_tracker = HeadTracker()
+                    head_tracker = MediapipeHeadTracker()
+                    logging.getLogger(__name__).info("Using mediapipe head tracker in process")
+            except Exception as e:
+                raise CameraVisionInitializationError(
+                    f"Failed to initialize {args.head_tracker} head tracker: {e}",
+                ) from e
 
-        # Initialize camera worker
         camera_worker = CameraWorker(current_robot, head_tracker)
 
-        # Initialize vision manager only if local vision is requested
         if args.local_vision:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    "from reachy_mini_conversation_app.vision.local_vision import VisionProcessor",
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if result.returncode < 0:
+                raise CameraVisionInitializationError(
+                    "Local vision import crashed on this machine. "
+                    "Run without --local-vision or install compatible dependencies.",
+                )
             try:
-                from reachy_mini_conversation_app.vision.processors import initialize_vision_manager
+                from reachy_mini_conversation_app.vision.local_vision import initialize_vision_processor
 
-                vision_manager = initialize_vision_manager(camera_worker)
             except ImportError as e:
-                raise ImportError(
+                raise CameraVisionInitializationError(
+                    "To use --local-vision, please install the extra dependencies: pip install '.[local_vision]'",
+                ) from e
+
+            try:
+                vision_processor = initialize_vision_processor()
+            except ImportError as e:
+                raise CameraVisionInitializationError(
                     "To use --local-vision, please install the extra dependencies: pip install '.[local_vision]'",
                 ) from e
         else:
             logging.getLogger(__name__).info(
-                "Using gpt-realtime for vision (default). Use --local-vision for local processing.",
+                "Using the selected realtime backend for vision (default). Use --local-vision for local processing.",
             )
 
-    return camera_worker, head_tracker, vision_manager
+    return camera_worker, vision_processor
 
 
 def setup_logger(debug: bool) -> logging.Logger:
@@ -89,6 +158,7 @@ def setup_logger(debug: bool) -> logging.Logger:
     logging.basicConfig(
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s:%(lineno)d | %(message)s",
+        force=True,
     )
     logger = logging.getLogger(__name__)
 
@@ -109,28 +179,25 @@ def setup_logger(debug: bool) -> logging.Logger:
         logging.getLogger("aioice").setLevel(logging.WARNING)
     return logger
 
-def log_connection_troubleshooting(logger: logging.Logger, robot_name: Optional[str], host: Optional[str] = None) -> None:
+
+def log_connection_troubleshooting(
+    logger: logging.Logger,
+    robot_name: Optional[str],
+    host: Optional[str] = None,
+) -> None:
     """Log troubleshooting steps for connection issues."""
     logger.error("Troubleshooting steps:")
-    logger.error("  1. Verify reachy-mini-daemon is running on the robot")
+    logger.error("  1. Verify reachy-mini-daemon is running")
 
     if host is not None:
-        logger.error(f"  2. Verify the robot is reachable: ping {host}")
+        logger.error("  2. Verify the robot is reachable: ping %s", host)
     else:
-        logger.error(
-            "  2. For wireless connection, provide the robot's hostname or IP: "
-            "--host reachy-mini.local  (or --host <ip-address>)"
-        )
+        logger.error("  2. For wireless connection, add --host <hostname-or-ip>")
 
     if robot_name is not None:
-        logger.error(
-            f"  3. Daemon must be started with: --robot-name '{robot_name}'"
-        )
+        logger.error("  3. Daemon must be started with: --robot-name '%s'", robot_name)
     else:
-        logger.error(
-            "  3. If daemon uses --robot-name, add the same flag here: "
-            "--robot-name <name>"
-        )
+        logger.error("  3. If daemon uses --robot-name, add the same flag here: --robot-name <name>")
 
     logger.error("  4. Review daemon logs")
     logger.error("  5. Restart the daemon")
