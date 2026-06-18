@@ -14,7 +14,7 @@ tags:
 
 # Reachy Mini conversation app
 
-Conversational app for the Reachy Mini robot combining OpenAI's realtime APIs, vision pipelines, and choreographed motion libraries.
+Conversational app for the Reachy Mini robot combining **ElevenLabs Conversational AI** (voice + LLM), vision pipelines, and choreographed motion libraries.
 
 ![Reachy Mini Dance](docs/assets/reachy_mini_dance.gif)
 
@@ -26,22 +26,87 @@ Conversational app for the Reachy Mini robot combining OpenAI's realtime APIs, v
 - [Running the app](#running-the-app)
 - [LLM tools](#llm-tools-exposed-to-the-assistant)
 - [Advanced features](#advanced-features)
+- [Resources](#resources)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## Overview
-- Real-time audio conversation loop powered by the OpenAI realtime API and `fastrtc` for low-latency streaming.
-- Vision processing uses gpt-realtime by default (when camera tool is used), with optional local vision processing using SmolVLM2 model running on-device (CPU/GPU/MPS) via `--local-vision` flag.
-- Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and head-tracking.
-- Async tool dispatch integrates robot motion, camera capture, and optional head-tracking capabilities through a Gradio web UI with live transcripts.
+- Real-time audio conversation loop powered by the **ElevenLabs Conversational AI SDK** and `fastrtc` for low-latency bidirectional audio streaming.
+- Voice synthesis uses **`eleven_flash_v2_5`** — ElevenLabs' lowest-latency voice model — at 16 kHz PCM.
+- The LLM brain defaults to **`gpt-4o-mini`** (configurable per-agent) with full tool-calling support.
+- Vision processing supports local on-device inference using SmolVLM2 via the `--local-vision` flag.
+- Layered motion system queues primary moves (dances, emotions, goto poses, breathing) while blending speech-reactive wobble and head-tracking offsets at 100 Hz.
+- Async tool dispatch lets the LLM control motors, capture camera frames, and toggle head-tracking — all through the same profile-based tool system.
 
 ## Architecture
 
-The app follows a layered architecture connecting the user, AI services, and robot hardware:
+The app connects voice I/O, the ElevenLabs cloud, and Reachy Mini hardware through a set of concurrent workers:
 
-<p align="center">
-  <img src="docs/assets/conversation_app_arch.svg" alt="Architecture Diagram" width="600"/>
-</p>
+```mermaid
+flowchart TD
+    User["🎤 User (voice)"]
+    Speaker["🔊 Speaker"]
+
+    subgraph App["Reachy Mini App — Python process"]
+        direction TB
+        FRT["ElevenLabsRealtimeHandler\n(fastrtc AsyncStreamHandler)"]
+        AUDIO["FastRTCAudioInterface\n16 kHz PCM bridge"]
+        TOOLS["ClientTools dispatcher\ndispatch_tool_call()"]
+        MVR["MovementManager\n100 Hz control loop"]
+        HW["HeadWobbler\naudio-reactive motion"]
+        CAM["CameraWorker\n30 Hz · face-tracking"]
+        VIS["SmolVLM2\n(--local-vision only)"]
+    end
+
+    subgraph EL["☁️ ElevenLabs Cloud"]
+        direction TB
+        CONV["Conversational AI\nWebSocket agent"]
+        TTS["eleven_flash_v2_5\nTTS model"]
+        LLM["LLM (gpt-4o-mini)\ntool calling"]
+    end
+
+    subgraph Robot["🤖 Reachy Mini"]
+        MOTORS["Head + Antennas\n(motors · joints)"]
+    end
+
+    User -->|"raw PCM"| FRT
+    FRT -->|"16 kHz PCM bytes"| AUDIO
+    AUDIO -->|"audio stream"| CONV
+    CONV <-->|"STT · LLM · TTS"| LLM
+    CONV -->|"synthesised audio"| TTS
+    TTS -->|"16 kHz PCM bytes"| AUDIO
+    AUDIO -->|"numpy int16 chunks"| FRT
+    FRT -->|"PCM frames"| Speaker
+
+    LLM -->|"client_tool_call"| TOOLS
+    TOOLS -->|"move_head / dance / play_emotion …"| MVR
+    TOOLS -->|"camera frame request"| CAM
+    CAM -->|"latest frame"| VIS
+    VIS -->|"image description"| TOOLS
+
+    AUDIO -->|"audio deltas"| HW
+    HW -->|"speech offsets"| MVR
+    CAM -->|"head-tracking offsets"| MVR
+    MVR -->|"set_target() @ 100 Hz"| MOTORS
+```
+
+**Data flows:**
+
+| Path | Format | Notes |
+|------|--------|-------|
+| Mic → ElevenLabs | 16 kHz int16 PCM bytes | Resampled from fastrtc input rate if needed |
+| ElevenLabs → Speaker | 16 kHz int16 PCM bytes | Decoded from WebSocket audio frames |
+| Tool call → Result | JSON | `dispatch_tool_call()` awaited inline in `ClientTools` handler |
+| Camera frame | BGR uint8 NumPy array | Acquired from `CameraWorker`, optionally processed by SmolVLM2 |
+| Motion offsets | 6-DOF head pose | Blended additively on top of primary moves at 100 Hz |
+
+### First-run agent creation
+
+On the very first launch, the handler:
+
+1. Converts all profile tool specs (JSON Schema) to ElevenLabs `client` tool definitions.
+2. Calls `client.conversational_ai.agents.create(...)` with the profile's `instructions.txt` and voice mapping.
+3. Writes `ELEVENLABS_AGENT_ID=<id>` into your `.env` so subsequent runs skip creation and just call `agents.update(...)`.
 
 ## Installation
 
@@ -77,7 +142,7 @@ uv sync --extra all_vision           # All vision features
 
 Combine extras or include dev dependencies:
 ```bash
-uv sync --extra all_vision --group dev
+uv sync --extra all_vision --extra reachy_mini_wireless --group dev
 ```
 
 </details>
@@ -119,15 +184,18 @@ Some wheels (like PyTorch) are large and require compatible CUDA or CPU builds�
 ## Configuration
 
 1. Copy `.env.example` to `.env`
-2. Fill in required values, notably the OpenAI API key
+2. Set `ELEVENLABS_API_KEY` — all other values are optional
 
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | Required. Grants access to the OpenAI realtime endpoint. |
-| `MODEL_NAME` | Override the realtime model (defaults to `gpt-realtime`). Used for both conversation and vision (unless `--local-vision` flag is used). |
-| `HF_HOME` | Cache directory for local Hugging Face downloads (only used with `--local-vision` flag, defaults to `./cache`). |
-| `HF_TOKEN` | Optional token for Hugging Face access (for gated/private assets). |
-| `LOCAL_VISION_MODEL` | Hugging Face model path for local vision processing (only used with `--local-vision` flag, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`). |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `ELEVENLABS_API_KEY` | **Yes** | ElevenLabs API key. Get one at [elevenlabs.io](https://elevenlabs.io). |
+| `ELEVENLABS_AGENT_ID` | Auto | Populated automatically on first run. Set manually to pin a specific agent. |
+| `OPENAI_API_KEY` | Optional | Only needed for the legacy camera-tool fallback path (without `--local-vision`). |
+| `HF_HOME` | Optional | Cache directory for local Hugging Face downloads (only used with `--local-vision`, defaults to `./cache`). |
+| `HF_TOKEN` | Optional | Hugging Face token for gated/private assets. |
+| `LOCAL_VISION_MODEL` | Optional | HF model path for local vision (only with `--local-vision`, defaults to `HuggingFaceTB/SmolVLM2-2.2B-Instruct`). |
+
+> **Camera + vision tip:** For the `camera` tool to describe what it sees, run with `--local-vision`. Without it, the tool captures a frame but cannot pass it to the ElevenLabs voice model (audio-only).
 
 ## Running the app
 
@@ -148,9 +216,9 @@ The app runs in console mode by default. Add `--gradio` to launch a web UI at ht
 |--------|---------|-------------|
 | `--head-tracker {yolo,mediapipe}` | `None` | Select a head-tracking backend when a camera is available. YOLO is implemented locally, MediaPipe comes from the `reachy_mini_toolbox` package. Requires the matching optional extra. |
 | `--no-camera` | `False` | Run without camera capture or head tracking. |
-| `--local-vision` | `False` | Use local vision model (SmolVLM2) for periodic image processing instead of gpt-realtime vision. Requires `local_vision` extra to be installed. |
+| `--local-vision` | `False` | Use local vision model (SmolVLM2) for camera-tool image analysis. Requires `local_vision` extra. Recommended when using the `camera` tool with ElevenLabs (audio-only mode). |
 | `--gradio` | `False` | Launch the Gradio web UI. Without this flag, runs in console mode. Required when running in simulation mode. |
-| `--robot-name` | `None` | Optional. Connect to a specific robot by name when running multiple daemons on the same subnet. See [Multiple robots on the same subnet](#advanced-features). |
+| `--robot-name` | `None` | Optional. Connect to a specific robot by name when running multiple daemons on the same subnet. |
 | `--debug` | `False` | Enable verbose logging for troubleshooting. |
 
 ### Examples
@@ -159,7 +227,7 @@ The app runs in console mode by default. Add `--gradio` to launch a web UI at ht
 # Run with MediaPipe head tracking
 reachy-mini-conversation-app --head-tracker mediapipe
 
-# Run with local vision processing (requires local_vision extra)
+# Run with local vision processing (required for camera tool to describe images)
 reachy-mini-conversation-app --local-vision
 
 # Audio-only conversation (no camera)
@@ -174,11 +242,11 @@ reachy-mini-conversation-app --gradio
 | Tool | Action | Dependencies |
 |------|--------|--------------|
 | `move_head` | Queue a head pose change (left/right/up/down/front). | Core install only. |
-| `camera` | Capture the latest camera frame and send it to gpt-realtime for vision analysis. | Requires camera worker. Uses gpt-realtime vision by default. |
-| `head_tracking` | Enable or disable head-tracking offsets (not identity recognition - only detects and tracks head position). | Camera worker with configured head tracker (`--head-tracker`). |
+| `camera` | Capture the latest camera frame. With `--local-vision` uses SmolVLM2 to describe the scene; without it returns a placeholder (ElevenLabs is audio-only). | Requires camera worker. `--local-vision` recommended. |
+| `head_tracking` | Enable or disable head-tracking offsets (detects and tracks head position only — not identity recognition). | Camera worker with configured head tracker (`--head-tracker`). |
 | `dance` | Queue a dance from `reachy_mini_dances_library`. | Core install only. |
 | `stop_dance` | Clear queued dances. | Core install only. |
-| `play_emotion` | Play a recorded emotion clip via Hugging Face datasets. | Core install only. Uses the default open emotions dataset: [`pollen-robotics/reachy-mini-emotions-library`](https://huggingface.co/datasets/pollen-robotics/reachy-mini-emotions-library). |
+| `play_emotion` | Play a recorded emotion clip via Hugging Face datasets. | Core install only. Uses [`pollen-robotics/reachy-mini-emotions-library`](https://huggingface.co/datasets/pollen-robotics/reachy-mini-emotions-library). |
 | `stop_emotion` | Clear queued emotions. | Core install only. |
 | `do_nothing` | Explicitly remain idle. | Core install only. |
 
@@ -195,7 +263,7 @@ Create custom profiles with dedicated instructions and enabled tools.
 
 Set `REACHY_MINI_CUSTOM_PROFILE=<name>` to load `src/reachy_mini_conversation_app/profiles/<name>/` (see `.env.example`). If unset, the `default` profile is used.
 
-Each profile should include `instructions.txt` (prompt text). `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain custom tool implementations.
+Each profile should include `instructions.txt` (prompt text). `tools.txt` (list of allowed tools) is recommended. If missing for a non-default profile, the app falls back to `profiles/default/tools.txt`. Profiles can optionally contain a `voice.txt` with an ElevenLabs voice ID.
 
 **Custom instructions:**
 
@@ -222,6 +290,14 @@ Tools are resolved first from Python files in the profile folder (custom tools),
 
 On top of built-in tools found in the core library, you can implement custom tools specific to your profile by adding Python files in the profile folder.
 Custom tools must subclass `reachy_mini_conversation_app.tools.core_tools.Tool` (see `profiles/example/sweep_look.py`).
+
+**Voice selection:**
+
+Add a `voice.txt` to your profile containing either:
+- A known ElevenLabs voice ID (e.g. `21m00Tcm4TlvDq8ikWAM` for Rachel), or
+- One of the mapped OpenAI-style names: `cedar`, `alloy`, `aria`, `ballad`, `verse`, `sage`, `coral`.
+
+Browse voices at [elevenlabs.io/voice-library](https://elevenlabs.io/voice-library).
 
 **Edit personalities from the UI:**
 
@@ -262,7 +338,7 @@ external_content/
 │   └── my_profile/
 │       ├── instructions.txt
 │       ├── tools.txt        # optional (see fallback behavior below)
-│       └── voice.txt        # optional
+│       └── voice.txt        # optional — ElevenLabs voice ID
 └── external_tools/
     └── my_custom_tool.py
 ```
@@ -303,6 +379,21 @@ reachy-mini-conversation-app --robot-name <name>
 `<name>` must match the daemon's `--robot-name` value so the app connects to the correct robot.
 
 </details>
+
+## Resources
+
+| Resource | Description |
+|----------|-------------|
+| [ElevenLabs Python SDK](https://github.com/elevenlabs/elevenlabs-python) | Official Python client — `AsyncConversation`, `ClientTools`, `AsyncAudioInterface` |
+| [ElevenLabs Conversational AI docs](https://elevenlabs.io/docs/conversational-ai/overview) | Overview of the agent platform and WebSocket protocol |
+| [ElevenLabs Python SDK — Conversational AI](https://elevenlabs.io/docs/conversational-ai/libraries/conversational-ai-sdk-python) | Python-specific SDK guide |
+| [ElevenLabs Agents API — Create agent](https://elevenlabs.io/docs/api-reference/agents/create) | REST reference for `POST /v1/convai/agents/create` |
+| [ElevenLabs Client Tools](https://elevenlabs.io/docs/agents-platform/customization/tools/client-tools) | How to define and register Python-side tool handlers |
+| [ElevenLabs Overrides](https://elevenlabs.io/docs/eleven-agents/customization/personalization/overrides) | `conversation_config_override` — runtime system-prompt patching |
+| [ElevenLabs Voice Library](https://elevenlabs.io/voice-library) | Browse available voice IDs |
+| [fastrtc](https://github.com/gradio-app/fastrtc) | Real-time audio/video streaming library used for mic/speaker bridging |
+| [Reachy Mini SDK](https://huggingface.co/docs/reachy_mini/SDK/python-sdk) | Python SDK for motor control, camera, and robot state |
+| [Reachy Mini SDK — GitHub](https://github.com/pollen-robotics/reachy_mini/) | Source and setup instructions |
 
 ## Contributing
 

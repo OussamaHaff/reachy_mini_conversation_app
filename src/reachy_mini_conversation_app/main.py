@@ -45,7 +45,7 @@ def run(
     # Putting these dependencies here makes the dashboard faster to load when the conversation app is installed
     from reachy_mini_conversation_app.moves import MovementManager
     from reachy_mini_conversation_app.console import LocalStream
-    from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+    from reachy_mini_conversation_app.elevenlabs_realtime import ElevenLabsRealtimeHandler
     from reachy_mini_conversation_app.tools.core_tools import ToolDependencies
     from reachy_mini_conversation_app.audio.head_wobbler import HeadWobbler
 
@@ -63,8 +63,12 @@ def run(
             robot_kwargs = {}
             if args.robot_name is not None:
                 robot_kwargs["robot_name"] = args.robot_name
-
-            logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
+            if args.host is not None:
+                robot_kwargs["host"] = args.host
+                robot_kwargs["connection_mode"] = "network"
+                logger.info(f"Initializing ReachyMini (network mode, host={args.host})")
+            else:
+                logger.info("Initializing ReachyMini (SDK will auto-detect appropriate backend)")
             robot = ReachyMini(**robot_kwargs)
 
         except TimeoutError as e:
@@ -72,7 +76,7 @@ def run(
                 "Connection timeout: Failed to connect to Reachy Mini daemon. "
                 f"Details: {e}"
             )
-            log_connection_troubleshooting(logger, args.robot_name)
+            log_connection_troubleshooting(logger, args.robot_name, getattr(args, "host", None))
             sys.exit(1)
 
         except ConnectionError as e:
@@ -80,7 +84,7 @@ def run(
                 "Connection failed: Unable to establish connection to Reachy Mini. "
                 f"Details: {e}"
             )
-            log_connection_troubleshooting(logger, args.robot_name)
+            log_connection_troubleshooting(logger, args.robot_name, getattr(args, "host", None))
             sys.exit(1)
 
         except Exception as e:
@@ -133,15 +137,15 @@ def run(
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+    handler = ElevenLabsRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
 
     stream_manager: gr.Blocks | LocalStream | None = None
 
     if args.gradio:
         api_key_textbox = gr.Textbox(
-            label="OPENAI API Key",
+            label="ElevenLabs API Key",
             type="password",
-            value=os.getenv("OPENAI_API_KEY") if not get_space() else "",
+            value=os.getenv("ELEVENLABS_API_KEY") if not get_space() else "",
         )
 
         from reachy_mini_conversation_app.gradio_personality import PersonalityUI

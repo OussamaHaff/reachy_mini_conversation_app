@@ -14,7 +14,7 @@ class HeadTracking(Tool):
     description = "Toggle head tracking state."
     parameters_schema = {
         "type": "object",
-        "properties": {"start": {"type": "boolean"}},
+        "properties": {"start": {"type": "boolean", "description": "True to enable head tracking, False to disable it."}},
         "required": ["start"],
     }
 

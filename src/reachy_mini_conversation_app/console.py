@@ -1,11 +1,11 @@
 """Bidirectional local audio stream with optional settings UI.
 
-In headless mode, there is no Gradio UI. If the OpenAI API key is not
+In headless mode, there is no Gradio UI. If the ElevenLabs API key is not
 available via environment/.env, we expose a minimal settings page via the
 Reachy Mini Apps settings server to let non-technical users enter it.
 
 The settings UI is served from this package's ``static/`` folder and offers a
-single password field to set ``OPENAI_API_KEY``. Once set, we persist it to the
+single password field to set ``ELEVENLABS_API_KEY``. Once set, we persist it to the
 app instance's ``.env`` file (if available) and proceed to start streaming.
 """
 
@@ -23,7 +23,7 @@ from scipy.signal import resample
 from reachy_mini import ReachyMini
 from reachy_mini.media.media_manager import MediaBackend
 from reachy_mini_conversation_app.config import LOCKED_PROFILE, config
-from reachy_mini_conversation_app.openai_realtime import OpenaiRealtimeHandler
+from reachy_mini_conversation_app.elevenlabs_realtime import ElevenLabsRealtimeHandler
 from reachy_mini_conversation_app.headless_personality_ui import mount_personality_routes
 
 
@@ -49,7 +49,7 @@ class LocalStream:
 
     def __init__(
         self,
-        handler: OpenaiRealtimeHandler,
+        handler: ElevenLabsRealtimeHandler,
         robot: ReachyMini,
         *,
         settings_app: Optional[FastAPI] = None,
@@ -110,9 +110,9 @@ class LocalStream:
         """Persist API key to environment and instance ``.env`` if possible.
 
         Behavior:
-        - Always sets ``OPENAI_API_KEY`` in process env and in-memory config.
+        - Always sets ``ELEVENLABS_API_KEY`` in process env and in-memory config.
         - Writes/updates ``<instance_path>/.env``:
-          * If ``.env`` exists, replaces/append OPENAI_API_KEY line.
+          * If ``.env`` exists, replaces/appends ELEVENLABS_API_KEY line.
           * Else, copies template from ``<instance_path>/.env.example`` when present,
             otherwise falls back to the packaged template
             ``reachy_mini_conversation_app/.env.example``.
@@ -124,11 +124,11 @@ class LocalStream:
             return
         # Update live process env and config so consumers see it immediately
         try:
-            os.environ["OPENAI_API_KEY"] = k
+            os.environ["ELEVENLABS_API_KEY"] = k
         except Exception:  # best-effort
             pass
         try:
-            config.OPENAI_API_KEY = k
+            config.ELEVENLABS_API_KEY = k
         except Exception:
             pass
 
@@ -140,15 +140,15 @@ class LocalStream:
             lines = self._read_env_lines(env_path)
             replaced = False
             for i, ln in enumerate(lines):
-                if ln.strip().startswith("OPENAI_API_KEY="):
-                    lines[i] = f"OPENAI_API_KEY={k}"
+                if ln.strip().startswith("ELEVENLABS_API_KEY="):
+                    lines[i] = f"ELEVENLABS_API_KEY={k}"
                     replaced = True
                     break
             if not replaced:
-                lines.append(f"OPENAI_API_KEY={k}")
+                lines.append(f"ELEVENLABS_API_KEY={k}")
             final_text = "\n".join(lines) + "\n"
             env_path.write_text(final_text, encoding="utf-8")
-            logger.info("Persisted OPENAI_API_KEY to %s", env_path)
+            logger.info("Persisted ELEVENLABS_API_KEY to %s", env_path)
 
             # Load the newly written .env into this process to ensure downstream imports see it
             try:
@@ -158,7 +158,7 @@ class LocalStream:
             except Exception:
                 pass
         except Exception as e:
-            logger.warning("Failed to persist OPENAI_API_KEY: %s", e)
+            logger.warning("Failed to persist ELEVENLABS_API_KEY: %s", e)
 
     def _persist_personality(self, profile: Optional[str]) -> None:
         """Persist the startup personality to the instance .env and config."""
@@ -240,7 +240,7 @@ class LocalStream:
                 pass
 
         class ApiKeyPayload(BaseModel):
-            openai_api_key: str
+            elevenlabs_api_key: str
 
         # GET / -> index.html
         @self._settings_app.get("/")
@@ -255,7 +255,7 @@ class LocalStream:
         # GET /status -> whether key is set
         @self._settings_app.get("/status")
         def _status() -> JSONResponse:
-            has_key = bool(config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip())
+            has_key = bool(config.ELEVENLABS_API_KEY and str(config.ELEVENLABS_API_KEY).strip())
             return JSONResponse({"has_key": has_key})
 
         # GET /ready -> whether backend finished loading tools
@@ -268,10 +268,10 @@ class LocalStream:
                 ready = False
             return JSONResponse({"ready": ready})
 
-        # POST /openai_api_key -> set/persist key
-        @self._settings_app.post("/openai_api_key")
+        # POST /elevenlabs_api_key -> set/persist key
+        @self._settings_app.post("/elevenlabs_api_key")
         def _set_key(payload: ApiKeyPayload) -> JSONResponse:
-            key = (payload.openai_api_key or "").strip()
+            key = (payload.elevenlabs_api_key or "").strip()
             if not key:
                 return JSONResponse({"ok": False, "error": "empty_key"}, status_code=400)
             self._persist_api_key(key)
@@ -280,17 +280,20 @@ class LocalStream:
         # POST /validate_api_key -> validate key without persisting it
         @self._settings_app.post("/validate_api_key")
         async def _validate_key(payload: ApiKeyPayload) -> JSONResponse:
-            key = (payload.openai_api_key or "").strip()
+            key = (payload.elevenlabs_api_key or "").strip()
             if not key:
                 return JSONResponse({"valid": False, "error": "empty_key"}, status_code=400)
 
-            # Try to validate by checking if we can fetch the models
+            # Validate by hitting the ElevenLabs user endpoint
             try:
                 import httpx
 
-                headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.get("https://api.openai.com/v1/models", headers=headers)
+                base_url = (config.ELEVENLABS_API_BASE_URL or "https://api.elevenlabs.io").rstrip("/")
+                headers = {"xi-api-key": key, "Content-Type": "application/json"}
+                async with httpx.AsyncClient(timeout=10.0) as http_client:
+                    response = await http_client.get(
+                        f"{base_url}/v1/user", headers=headers
+                    )
                     if response.status_code == 200:
                         return JSONResponse({"valid": True})
                     elif response.status_code == 401:
@@ -324,10 +327,10 @@ class LocalStream:
                 if env_path.exists():
                     load_dotenv(dotenv_path=str(env_path), override=True)
                     # Update config with newly loaded values
-                    new_key = os.getenv("OPENAI_API_KEY", "").strip()
+                    new_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
                     if new_key:
                         try:
-                            config.OPENAI_API_KEY = new_key
+                            config.ELEVENLABS_API_KEY = new_key
                         except Exception:
                             pass
                     if LOCKED_PROFILE is None:
@@ -340,30 +343,15 @@ class LocalStream:
             except Exception:
                 pass  # Instance .env loading is optional; continue with defaults
 
-        # If key is still missing, try to download one from HuggingFace
-        if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
-            logger.info("OPENAI_API_KEY not set, attempting to download from HuggingFace...")
-            try:
-                from gradio_client import Client
-                client = Client("HuggingFaceM4/gradium_setup", verbose=False)
-                key, status = client.predict(api_name="/claim_b_key")
-                if key and key.strip():
-                    logger.info("Successfully downloaded API key from HuggingFace")
-                    # Persist it immediately
-                    self._persist_api_key(key)
-            except Exception as e:
-                logger.warning(f"Failed to download API key from HuggingFace: {e}")
-
         # Always expose settings UI if a settings app is available
-        # (do this AFTER loading/downloading the key so status endpoint sees the right value)
         self._init_settings_ui_if_needed()
 
         # If key is still missing -> wait until provided via the settings UI
-        if not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
-            logger.warning("OPENAI_API_KEY not found. Open the app settings page to enter it.")
+        if not (config.ELEVENLABS_API_KEY and str(config.ELEVENLABS_API_KEY).strip()):
+            logger.warning("ELEVENLABS_API_KEY not found. Open the app settings page to enter it.")
             # Poll until the key becomes available (set via the settings UI)
             try:
-                while not (config.OPENAI_API_KEY and str(config.OPENAI_API_KEY).strip()):
+                while not (config.ELEVENLABS_API_KEY and str(config.ELEVENLABS_API_KEY).strip()):
                     time.sleep(0.2)
             except KeyboardInterrupt:
                 logger.info("Interrupted while waiting for API key.")

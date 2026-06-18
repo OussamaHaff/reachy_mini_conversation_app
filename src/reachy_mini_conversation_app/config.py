@@ -104,8 +104,15 @@ else:
 class Config:
     """Configuration class for the conversation app."""
 
-    # Required
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # The key is downloaded in console.py if needed
+    # ElevenLabs credentials (replaces OpenAI for conversational AI)
+    ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+    # Reuse an existing agent between restarts (auto-populated on first run)
+    ELEVENLABS_AGENT_ID = os.getenv("ELEVENLABS_AGENT_ID")
+    # EU residency: set to https://api.eu.residency.elevenlabs.io  (None = global default)
+    ELEVENLABS_API_BASE_URL = os.getenv("ELEVENLABS_API_BASE_URL")
+
+    # Legacy OpenAI key kept for vision/camera tool compatibility
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
     # Optional
     MODEL_NAME = os.getenv("MODEL_NAME", "gpt-realtime")

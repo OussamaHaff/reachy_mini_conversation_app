@@ -22,6 +22,7 @@ class MoveHead(Tool):
             "direction": {
                 "type": "string",
                 "enum": ["left", "right", "up", "down", "front"],
+                "description": "The direction to move the head: left, right, up, down, or front (center).",
             },
         },
         "required": ["direction"],

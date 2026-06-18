@@ -91,17 +91,18 @@ def get_session_instructions() -> str:
         sys.exit(1)
 
 
-def get_session_voice(default: str = "cedar") -> str:
+def get_session_voice(default: str = "verse") -> str:
     """Resolve the voice to use for the session.
 
-    If a custom profile is selected and contains a voice.txt, return its
-    trimmed content; otherwise return the provided default ("cedar").
+    Checks the active profile's voice.txt first (custom or default),
+    then falls back to the provided default ("cedar").
     """
     profile = config.REACHY_MINI_CUSTOM_PROFILE
-    if not profile:
-        return default
     try:
-        voice_file = config.PROFILES_DIRECTORY / profile / VOICE_FILENAME
+        if profile:
+            voice_file = config.PROFILES_DIRECTORY / profile / VOICE_FILENAME
+        else:
+            voice_file = DEFAULT_PROFILES_DIRECTORY / "default" / VOICE_FILENAME
         if voice_file.exists():
             voice = voice_file.read_text(encoding="utf-8").strip()
             return voice or default
