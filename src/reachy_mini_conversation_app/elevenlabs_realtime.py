@@ -51,11 +51,14 @@ logger = logging.getLogger(__name__)
 # ElevenLabs Conversational AI uses 16 kHz PCM mono for both input and output
 ELEVENLABS_SAMPLE_RATE: Final[int] = 16000
 
-# Best ElevenLabs voice model for low-latency conversational AI (Flash v2.5)
-ELEVENLABS_TTS_MODEL: Final[str] = "eleven_flash_v2"
+# ElevenLabs v3 Conversational TTS model for expressive voice agents.
+ELEVENLABS_TTS_MODEL: Final[str] = "eleven_v3_conversational"
 
 # Default LLM for the agent (good tool-calling support, cost-effective)
 ELEVENLABS_LLM_MODEL: Final[str] = "gpt-4o-mini"
+
+# ElevenLabs turn-taking model.
+ELEVENLABS_TURN_MODEL: Final[str] = "turn_v3"
 
 # Map OpenAI voice names → ElevenLabs voice IDs (used when voice.txt contains an OpenAI name)
 _OPENAI_TO_ELEVENLABS_VOICE: Dict[str, str] = {
@@ -636,9 +639,11 @@ class ElevenLabsRealtimeHandler(_ConversationHandler):
                 "tts": {
                     "model_id": ELEVENLABS_TTS_MODEL,
                     "voice_id": voice_id,
+                    "expressive_mode": True,
                 },
                 "turn": {
                     "turn_timeout": 7,
+                    "turn_model": ELEVENLABS_TURN_MODEL,
                     "mode": "turn",  # "turn" enables barge-in interruption (default)
                 },
             },

@@ -111,8 +111,9 @@ The agent configuration includes:
 | LLM | `ELEVENLABS_LLM_MODEL`, currently `gpt-4o-mini` |
 | First message | `Hello! I'm Reachy Loco. How can I help you?` |
 | Language | `en` |
-| TTS model | `eleven_flash_v2` |
+| TTS model | `ELEVENLABS_TTS_MODEL`, currently `eleven_v3_conversational` |
 | Voice | Current app voice mapped to an ElevenLabs voice ID |
+| Turn model | `ELEVENLABS_TURN_MODEL`, currently `turn_v3` |
 | Turn mode | `turn` with `turn_timeout=7` |
 | Tools | Active app tools converted to ElevenLabs client tools |
 
